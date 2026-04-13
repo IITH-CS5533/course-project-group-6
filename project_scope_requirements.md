@@ -28,6 +28,13 @@ We implement a fair auction protocol with:
 - Anti-bot protections to limit spam and unfair automation
 - Transaction Simulation to preview outcomes before execution
 
+Additionally:
+
+- Auctioned assets are represented as **NFTs (Non-Fungible Tokens)**  
+- We maintain an NFT collection within our smart contract  
+- Users can create NFTs through our platform, which are then stored in their account
+- NFTs are stored on-chain as Move resources, with metadata (name, description, image URL)  
+
 ---
 
 ## 4. Core Features
@@ -35,9 +42,9 @@ We implement a fair auction protocol with:
 ### 🔹 Auction Creation
 Seller creates auction with:
 - Starting price
-- Auction duration
+- Auction duration (with an enforced upper bound to prevent misuse)
 - Minimum bid increment (%)
-- Maximum extension limit
+- Maximum extension limit (hard cap)
 
 ---
 
@@ -46,17 +53,48 @@ Seller creates auction with:
 - Tokens are locked in the vault during the auction  
 - Highest valid bid is tracked on-chain  
 
+**Refund Logic:**
+- When a new higher bid is placed:
+  - The previous highest bidder is **immediately refunded**  
+  - Prevents unnecessary locking of funds  
+
+**Bid Update Logic:**
+- If a user increases their bid (e.g., from 10 → 20):
+  - Only the latest bid (20) is considered active  
+- If the user is not the previously highest bidder 
+ - This means the bidder was outbid previously and the older amount was already refunded, so the entire new amount is locked.
+- If the user is already the highest bidder:
+  - Only the additional amount is locked  
+- Decreasing a bid is **not allowed**  
+- No bid cancellation.
+
+
+
 ---
 
 ### 🔹 Speed Bump Logic
-- If a bid is placed within the last N seconds:
-  - Auction end time is extended  
-- Extensions are capped by a predefined limit  
+- A **sniping attack** occurs when a bidder places a bid at the last moment, leaving no time for others to respond  
+
+**Example Scenario:**
+- Auction ends at 10:00:00  
+- User A bids 10 tokens at 09:59:58  
+- *A bot detects this and bids 11 tokens at 09:59:59*
+- Auction ends → User A has no chance to react  
+
+**Solution (Speed Bump):**
+- If a **new bid surpassing the current highest bid** is placed within the last N seconds:
+  - Auction end time is extended by N seconds  
+- Extensions are limited by a **hard cap**  
+
+**Effect:**
+- Late bids no longer immediately end the auction  
+- Other users get time to respond  
+- Reduces unfair timing advantage  
 
 ---
 
 ### 🔹 Vault Security
-- Assets and tokens are stored in a resource account (digital vault)  
+- Assets (NFTs) and tokens are stored in a resource account (digital vault)  
 - Only smart contract logic controls fund movement  
 - Prevents unauthorized withdrawals  
 
@@ -64,9 +102,9 @@ Seller creates auction with:
 
 ### 🔹 Settlement Logic
 - After auction ends:
-  - Highest bidder receives asset  
+  - Highest bidder receives NFT  
   - Seller receives tokens  
-  - Other bidders are refunded  
+  - No funds remain locked  
 
 ---
 
@@ -79,6 +117,7 @@ Seller creates auction with:
 ---
 
 ### 🔹 Speed Bump
+- Triggered only when a **new valid highest bid** is placed  
 - Extends auction time for last-minute bids  
 - Reduces sniping advantage  
 
@@ -99,7 +138,7 @@ Seller creates auction with:
 ### 🔹 Max Bids per User
 - Each user has a limit on total bids per auction  
 - Prevents dominance by a single participant  
-- Will be applied when the bid leads to a time extension  
+- Applied when bid leads to time extension  
 
 ---
 
@@ -128,7 +167,7 @@ Seller creates auction with:
 ---
 
 ### 🔹 User Dashboard
-- View:
+- UI Display:
   - Auctions created  
   - Bids placed  
   - Auctions won/lost  
@@ -138,8 +177,9 @@ Seller creates auction with:
 ## 7. User Workflow
 
 ### Seller:
+- Create or own an NFT  
 - Create auction  
-- Deposit asset into vault  
+- Deposit NFT into vault  
 - Wait for auction completion  
 - Receive tokens  
 
@@ -150,8 +190,8 @@ Seller creates auction with:
 - Simulate bid (optional)  
 - Place bid  
 - Tokens locked in vault  
-- If highest → win asset  
-- Else → refund  
+- If outbid → immediate refund  
+- If highest → win NFT  
 
 ---
 
