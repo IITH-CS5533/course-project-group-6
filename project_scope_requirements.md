@@ -1,212 +1,338 @@
 # Project Scope: Fair Auction Marketplace on Aptos
 
 ## 1. Project Overview
-This project implements a fair and secure decentralized auction system on the Aptos blockchain using the Move programming language.
+This project implements a secure and decentralized auction marketplace on the Aptos blockchain using the Move programming language.
 
 The system is designed to:
-- Prevent last-second bidding advantages (sniping)
 - Reduce bot-based manipulation
 - Ensure transparency and trust through on-chain logic
+- Support multiple auction types for real-world usability
 
 ---
 
 ## 2. Problem Statement
 Traditional and existing blockchain auctions suffer from:
 
-- Sniping Attacks: Bots place bids in the last milliseconds, leaving no time for real users to respond
 - Bot Spamming: Automated systems repeatedly place bids to manipulate prices
 - Unfair Incrementing: Minimal bid increases allow bots to dominate auctions
+- Inefficient fund locking mechanisms
 - Honeypot Risks: Users cannot verify outcomes before interacting with contracts
 
 ---
 
 ## 3. Proposed Solution
-We implement a fair auction protocol with:
+We implement a secure auction protocol with:
 
 - A Digital Vault (Resource Account) to securely hold assets and bids
-- An IEX-inspired Speed Bump to extend auctions on last-minute bids
 - Anti-bot protections to limit spam and unfair automation
 - Transaction Simulation to preview outcomes before execution
 
 Additionally:
 
 - Auctioned assets are represented as **NFTs (Non-Fungible Tokens)**  
-- We maintain an NFT collection within our smart contract  
-- Users can create NFTs through our platform, which are then stored in their account
-- NFTs are stored on-chain as Move resources, with metadata (name, description, image URL)  
+- NFTs are created through our smart contract and stored in user accounts  
+- NFTs are stored on-chain as Move resources with metadata:
+  - Name  
+  - Description  
+  - Image URL  
+
+### Ownership Model:
+- NFTs are owned by users (not the contract)  
+- Only the NFT owner can create an auction  
+- NFTs are transferred to the vault only during auction  
 
 ---
 
-## 4. Core Features
+## 4. Account Model
 
-### 🔹 Auction Creation
-Seller creates auction with:
-- Starting price
-- Auction duration (with an enforced upper bound to prevent misuse)
-- Minimum bid increment (%)
-- Maximum extension limit (hard cap)
+The system defines two types of accounts:
+
+### 🔹 Admin Account
+- Controls system-level parameters  
+- Can configure:
+  - Maximum auction duration  
+  - Minimum bid increment/decrement  
+  - Cooldown duration  
+  - Reverse auction limits  
 
 ---
 
-### 🔹 Bidding System
-- Users place bids using fungible tokens
-- Tokens are locked in the vault during the auction  
+### 🔹 User Accounts
+Users can act in multiple roles:
+- Seller (forward auction)
+- Bidder (forward auction)
+- Buyer (reverse auction)
+- Seller (reverse auction)
+
+All transactions are signed via the user's wallet.
+
+---
+
+## 5. Core Features
+
+---
+
+### 🔹 5.1 Forward Auction (NFT Sale)
+
+#### Auction Creation:
+Seller must:
+- Own the NFT  
+- Deposit NFT into vault  
+- Define:
+  - Starting price  
+  - Auction duration (bounded by admin limit)  
+  - Minimum bid increment  
+
+---
+
+#### Bidding System:
+- Users place bids using fungible tokens  
 - Highest valid bid is tracked on-chain  
 
-**Refund Logic:**
+#### Bid Validation:
+new_bid > current_highest_bid
+
+
+---
+
+#### Refund Logic:
 - When a new higher bid is placed:
-  - The previous highest bidder is **immediately refunded**  
-  - Prevents unnecessary locking of funds  
+  - Previous highest bidder is **immediately refunded**
 
-**Bid Update Logic:**
-- If a user increases their bid (e.g., from 10 → 20):
-  - Only the latest bid (20) is considered active  
-- If the user is not the previously highest bidder 
- - This means the bidder was outbid previously and the older amount was already refunded, so the entire new amount is locked.
-- If the user is already the highest bidder:
-  - Only the additional amount is locked  
+---
+
+#### Bid Update Logic:
+- If user increases bid:
+  - Only latest bid is active  
+- If already highest bidder:
+  - Only additional amount is locked  
+- If previously outbid:
+  - Full new bid amount is locked  
+
+---
+
+#### Constraints:
 - Decreasing a bid is **not allowed**  
-- No bid cancellation.
-
-
+- Bid cancellation is **not allowed**
 
 ---
 
-### 🔹 Speed Bump Logic
-- A **sniping attack** occurs when a bidder places a bid at the last moment, leaving no time for others to respond  
-
-**Example Scenario:**
-- Auction ends at 10:00:00  
-- User A bids 10 tokens at 09:59:58  
-- *A bot detects this and bids 11 tokens at 09:59:59*
-- Auction ends → User A has no chance to react  
-
-**Solution (Speed Bump):**
-- If a **new bid surpassing the current highest bid** is placed within the last N seconds:
-  - Auction end time is extended by N seconds  
-- Extensions are limited by a **hard cap**  
-
-**Effect:**
-- Late bids no longer immediately end the auction  
-- Other users get time to respond  
-- Reduces unfair timing advantage  
+#### Settlement:
+- NFT → highest bidder  
+- Tokens → seller  
+- No funds remain locked  
 
 ---
 
-### 🔹 Vault Security
-- Assets (NFTs) and tokens are stored in a resource account (digital vault)  
-- Only smart contract logic controls fund movement  
-- Prevents unauthorized withdrawals  
+---
+
+### 🔹 5.2 Reverse Auction (Service-Based)
+
+#### Model:
+- Buyer posts requirement  
+- Sellers compete with **lower bids**  
+- Lowest valid bid wins  
 
 ---
 
-### 🔹 Settlement Logic
-- After auction ends:
-  - Highest bidder receives NFT  
-  - Seller receives tokens  
-  - No funds remain locked  
+#### Auction Creation (Buyer):
+Buyer must:
+- Define requirement description  
+- Define auction duration (bounded)  
+- Deposit maximum budget into vault  
 
 ---
 
-## 5. Anti-Bot Protection Features
+#### Bidding Logic:
 
-### 🔹 Minimum Bid Increment
-- Each new bid must exceed current bid by a percentage (e.g., 5%)  
+new_bid < current_lowest_bid
+
+
+- First bid initializes lowest bid  
+
+---
+
+#### Rules:
+- Sellers can only decrease bids  
+- Increasing bids is not allowed  
+- Equal bids are rejected  
+
+---
+
+#### Fund Model (Escrow-Based):
+- Buyer deposits maximum budget at auction creation  
+- Ensures payment is guaranteed  
+
+---
+
+#### Settlement:
+- Lowest bidder is selected as winner  
+- Winning amount is transferred from vault to seller  
+- Remaining funds are refunded to buyer  
+
+---
+
+#### Edge Cases:
+- No bids → no winner  
+
+---
+
+## 6. Vault & Fund Management
+
+### Digital Vault:
+- Implemented using Resource Accounts  
+- Holds:
+  - NFTs during forward auctions  
+  - Tokens during bidding  
+
+---
+
+### Fund Principles:
+- Immediate refund on outbid  
+- Minimal capital locking  
+- No unnecessary fund retention  
+
+---
+
+## 7. Anti-Bot Protection Features
+
+### 🔹 Minimum Bid Increment / Decrement
+- Each new bid must exceed/decrease current bid by a percentage  
 - Prevents micro-increment spam  
 
 ---
 
-### 🔹 Speed Bump
-- Triggered only when a **new valid highest bid** is placed  
-- Extends auction time for last-minute bids  
-- Reduces sniping advantage  
-
----
-
 ### 🔹 Cooldown per User
-- Users must wait a fixed time (e.g., 5–10 seconds) between bids  
+- Users must wait a fixed time between bids  
 - Prevents rapid automated bidding  
 
 ---
 
-### 🔹 Maximum Extensions Cap
-- Limits how many times auction can be extended  
-- Prevents indefinite prolonging  
-
----
-
-### 🔹 Max Bids per User
-- Each user has a limit on total bids per auction  
-- Prevents dominance by a single participant  
-- Applied when bid leads to time extension  
-
----
-
 ### 🔹 Bid Fee / Deposit
-- Each bid requires a small fee or temporary token lock  
-- Discourages spam and bot abuse  
+- Small fee or temporary lock per bid  
+- Discourages spam  
+
 
 ---
 
-## 6. Additional Features
+## 8. Frontend & Wallet Integration
 
-### 🔹 Bid History UI
-- Display all bids with timestamps  
-- Helps users understand auction progression  
+- Frontend integrated with wallet  
+- All transactions are signed by users  
 
----
-
-### 🔹 Transaction Simulation UI
-- Users can preview:
-  - Bid success/failure  
-  - Updated highest bid  
-  - Auction time extension  
-
-- Improves trust and prevents unexpected outcomes  
+### Features:
+- Auction browsing  
+- Bid placement  
+- Reverse auction participation  
+- User dashboard  
 
 ---
 
-### 🔹 User Dashboard
-- UI Display:
-  - Auctions created  
-  - Bids placed  
-  - Auctions won/lost  
+## 9. User Workflow
 
----
-
-## 7. User Workflow
-
-### Seller:
-- Create or own an NFT  
+### Seller (Forward Auction):
+- Create NFT  
 - Create auction  
 - Deposit NFT into vault  
-- Wait for auction completion  
-- Receive tokens  
+- Receive tokens after auction  
 
 ---
 
 ### Bidder:
-- View auction details  
-- Simulate bid (optional)  
+- View auction  
 - Place bid  
-- Tokens locked in vault  
 - If outbid → immediate refund  
-- If highest → win NFT  
+- If winner → receive NFT  
 
 ---
 
-## 8. Security & Verification
-
-### 🔹 Move Prover
-- Ensure:
-  - Funds cannot be stolen  
-  - Only valid winner receives asset  
+### Buyer (Reverse Auction):
+- Create requirement  
+- Deposit budget  
+- Wait for bids  
+- Receive service from winner  
 
 ---
 
-### 🔹 Unit Testing
-- Test:
-  - Speed bump logic  
-  - Cooldown enforcement  
-  - Bid validation rules  
-  - Settlement correctness  
+### Seller (Reverse Auction):
+- View requirements  
+- Place lower bids  
+- Win → receive payment  
+
+---
+
+## 10. Security & Verification
+
+### Move Prover:
+- Ensures:
+  - Correct ownership transfer  
+  - No fund leakage  
+
+---
+
+## 11. Auction Execution & Settlement Mechanism
+
+### 🔹 Auction Lifecycle
+
+- Each auction stores an *end_time* on-chain  
+- An auction is considered **eligible for settlement** once: current_time >= end_time
+
+---
+
+### 🔹 Off-Chain Bot (Automation Layer)
+
+Since smart contracts do not execute automatically, we use an **off-chain bot** to monitor and trigger settlement.
+
+#### Responsibilities of the Bot:
+- Continuously monitor active auctions  
+- Detect when: current_time >= auction_end_time
+- Trigger a transaction: settle_auction(auction_id)
+
+---
+
+### 🔹 Role of Smart Contract
+
+- The smart contract performs:
+  - Validation of auction state  
+  - Determination of winner  
+  - Transfer of assets and funds  
+  - Marking auction as completed  
+
+- The bot does **not** control:
+  - Fund transfers  
+  - Winner selection  
+
+All critical logic is enforced on-chain.
+
+---
+
+### 🔹 Permissionless Settlement
+
+- The *settle_auction* function is **publicly callable**  
+- Any user (not just the bot) can trigger settlement  
+
+This ensures:
+- No dependency on a single off-chain entity  
+- Robust and decentralized execution  
+
+---
+
+### 🔹 Failure Handling
+
+- If the bot fails:
+  - Any user can manually trigger settlement  
+- Ensures auctions are always eventually settled  
+
+---
+
+### 🔹 Design Principle
+
+> The off-chain bot provides automation, while the smart contract guarantees correctness and security.
+
+
+
+### Unit Testing:
+- Bid validation  
+- Refund correctness  
+- Auction settlement  
+- Reverse auction correctness  
