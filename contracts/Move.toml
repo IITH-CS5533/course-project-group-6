@@ -1,11 +1,15 @@
 [package]
 name = "fair_auction"
 version = "1.0.0"
-authors = []
+authors = ["Group 6"]
 
 [addresses]
+fair_auction = "_"
+admin = "_"
 
 [dev-addresses]
+fair_auction = "0xCAFE1"
+admin = "0xCAFE2"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-framework.git"
