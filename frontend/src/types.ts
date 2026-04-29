@@ -11,8 +11,47 @@ export interface NFTMetadata {
   inAuction: boolean;
 }
 
+export type AuctionType = "forward";
+export type AuctionStatus = "active" | "settled" | "cancelled";
+
+export interface BidRecord {
+  bidder: string;
+  amount: number;
+  timestamp: number;
+}
+
+export interface Auction {
+  id: number;
+  auctionType: AuctionType;
+  seller: string;
+  nftId: number;
+  nftMetadata?: NFTMetadata;        // enriched client-side
+  startingPrice: number;
+  currentBestBid: number;
+  bestBidder: string;
+  endTime: number;                  // unix seconds
+  extensionCount: number;
+  status: AuctionStatus;
+  bidHistory: BidRecord[];
+}
+
 export interface UserDashboard {
+  auctionsCreated: Auction[];
+  bidsPlaced: BidRecord[];
+  auctionsWon: Auction[];
   nftsOwned: NFTMetadata[];
+}
+
+export interface SimulationResult {
+  willSucceed: boolean;
+  newHighestBid: number;
+  timeExtended: boolean;
+  newEndTime: number;
+  cooldownViolation: boolean;
+  bidTooLow: boolean;
+  minNextBid: number;
+  bidFee: number;
+  reason?: string;
 }
 
 export interface WalletContextType {
@@ -29,3 +68,6 @@ export interface TransactionPayload {
   arguments: (string | number | boolean | string[])[];
 }
 
+export type SortOption = "endTime" | "currentBid" | "startPrice" | "newest";
+export type FilterStatus = "all" | "active" | "settled";
+export type FilterType  = "all" | "forward";

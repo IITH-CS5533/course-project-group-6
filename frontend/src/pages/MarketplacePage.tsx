@@ -35,8 +35,8 @@ function AuctionCard({ auction }: { auction: Auction }) {
         )}
         {/* Badges overlay */}
         <div style={{ position:"absolute", top:12, left:12, display:"flex", gap:6 }}>
-          <span className={`badge badge-${auction.auctionType}`}>
-            {auction.auctionType === "forward" ? "Forward" : "Reverse"}
+          <span className={`badge badge-forward`}>
+            Forward
           </span>
           {auction.status === "active" && (
             <span className={`badge ${isUrgent ? "badge-ending" : "badge-active"}`}>
@@ -56,13 +56,8 @@ function AuctionCard({ auction }: { auction: Auction }) {
 
       {/* Body */}
       <div style={{ padding:"18px" }}>
-        {auction.auctionType === "forward" && nft && (
+        {nft && (
           <h3 style={{ fontSize:16, fontWeight:700, marginBottom:4, color:"#f1f5f9" }}>{nft.name}</h3>
-        )}
-        {auction.auctionType === "reverse" && (
-          <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4, color:"#f1f5f9", lineHeight:1.4 }}>
-            {auction.requirementDescription.slice(0,60)}…
-          </h3>
         )}
         <p style={{ fontSize:13, color:"#64748b", marginBottom:14 }}>
           Seller: {auction.seller.slice(0,8)}…
@@ -71,7 +66,7 @@ function AuctionCard({ auction }: { auction: Auction }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
           <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:8, padding:"10px 12px" }}>
             <div style={{ fontSize:11, color:"#64748b", fontWeight:600, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>
-              {auction.auctionType === "forward" ? "Current Bid" : "Lowest Bid"}
+              Current Bid
             </div>
             <div style={{ fontSize:18, fontWeight:800, color:"#6366f1", fontFamily:"'Space Grotesk',sans-serif" }}>
               {auction.currentBestBid > 0 ? `${formatAPT(auction.currentBestBid)} APT` : "No bids"}
@@ -106,7 +101,6 @@ export default function MarketplacePage() {
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
-  const [filterType, setFilterType] = useState<FilterType>("all");
   const [sort, setSort] = useState<SortOption>("endTime");
   const { connected } = useContext(WalletContext);
 
@@ -122,13 +116,11 @@ export default function MarketplacePage() {
 
   const filtered = auctions
     .filter(a => filterStatus === "all" || a.status === filterStatus)
-    .filter(a => filterType === "all" || a.auctionType === filterType)
     .filter(a => {
       if (!search) return true;
       const q = search.toLowerCase();
       return (
-        a.nftMetadata?.name.toLowerCase().includes(q) ||
-        a.requirementDescription.toLowerCase().includes(q) ||
+        a.nftMetadata?.name?.toLowerCase().includes(q) ||
         a.seller.toLowerCase().includes(q)
       );
     })
@@ -183,14 +175,6 @@ export default function MarketplacePage() {
             {(["all","active","settled"] as FilterStatus[]).map(s => (
               <button key={s} className={`tab ${filterStatus===s?"active":""}`} onClick={() => setFilterStatus(s)}>
                 {s.charAt(0).toUpperCase()+s.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          <div className="tabs">
-            {(["all","forward","reverse"] as FilterType[]).map(t => (
-              <button key={t} className={`tab ${filterType===t?"active":""}`} onClick={() => setFilterType(t)}>
-                {t.charAt(0).toUpperCase()+t.slice(1)}
               </button>
             ))}
           </div>
