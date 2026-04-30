@@ -209,10 +209,9 @@ module fair_auction::nft {
         nft.in_auction = false;
         nft.owner = winner;
 
-        if (!exists<NFTCollection>(winner)) {
-            // Caller must ensure winner has a collection; if not, we skip the transfer and return to owner
-            // But for this project, we assume winner exists (test setup ensures this)
-        };
+        // If winner doesn't have a collection, we have to abort because we can't create one for them
+        // without their signer. Bidders must initialize their collection before bidding.
+        assert!(exists<NFTCollection>(winner), E_COLLECTION_NOT_FOUND);
 
         let to_collection = borrow_global_mut<NFTCollection>(winner);
         vector::push_back(&mut to_collection.nfts, nft);

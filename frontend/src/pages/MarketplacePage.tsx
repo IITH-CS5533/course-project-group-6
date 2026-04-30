@@ -4,30 +4,34 @@ import { timeRemaining, formatAPT, fetchAllAuctions, settleForwardAuction, settl
 import type { Auction, FilterStatus, FilterType, SortOption } from "../types";
 import { WalletContext } from "../App";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { normalizeAddress } from "../hooks/useAptos";
 
 function AuctionCard({ auction, onSettle }: { auction: Auction, onSettle: () => void }) {
   const navigate = useNavigate();
-  const { signAndSubmitTransaction } = useWallet();
-  const [timer, setTimer] = useState(timeRemaining(auction.endTime));
-  const [isSettling, setIsSettling] = useState(false);
-  const isUrgent = auction.endTime - Date.now()/1000 < 300;
-  const isExpired = auction.endTime - Date.now()/1000 <= 0;
+    const { connected, address, connect } = useContext(WalletContext);
+    const { signAndSubmitTransaction } = useWallet();
+    const [timer, setTimer] = useState(timeRemaining(auction.endTime));
+    const [isSettling, setIsSettling] = useState(false);
+    const isUrgent = auction.endTime - Date.now()/1000 < 300;
+    const isExpired = auction.endTime - Date.now()/1000 <= 0;
+    const isCreator = address && normalizeAddress(address) === normalizeAddress(auction.seller);
 
-  useEffect(() => {
-    const id = setInterval(() => setTimer(timeRemaining(auction.endTime)), 1000);
-    return () => clearInterval(id);
-  }, [auction.endTime]);
+    useEffect(() => {
+      const id = setInterval(() => setTimer(timeRemaining(auction.endTime)), 1000);
+      return () => clearInterval(id);
+    }, [auction.endTime]);
 
-  const handleSettle = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!signAndSubmitTransaction) return;
-    setIsSettling(true);
-    try {
-      if (auction.auctionType === "forward") {
-        await settleForwardAuction(signAndSubmitTransaction, auction.id);
-      } else {
-        await settleReverseAuction(signAndSubmitTransaction, auction.id);
-      }
+    const handleSettle = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!connected) { connect(); return; }
+      if (!signAndSubmitTransaction) return;
+      setIsSettling(true);
+      try {
+        if (auction.auctionType === "forward") {
+          await settleForwardAuction(signAndSubmitTransaction, auction.id);
+        } else {
+          await settleReverseAuction(signAndSubmitTransaction, auction.id);
+        }
       onSettle();
     } catch (err) {
       console.error("Settlement failed", err);
@@ -61,8 +65,8 @@ function AuctionCard({ auction, onSettle }: { auction: Auction, onSettle: () => 
             {auction.auctionType === "forward" ? "Forward" : "Reverse"}
           </span>
           {auction.status === "active" && (
-            <span className={`badge ${isUrgent ? "badge-ending" : "badge-active"}`}>
-              {isUrgent ? "Ending Soon" : "Live"}
+            <span className={`badge ${isExpired ? "badge-expired" : isUrgent ? "badge-ending" : "badge-active"}`}>
+              {isExpired ? "Ended" : isUrgent ? "Ending Soon" : "Live"}
             </span>
           )}
           {auction.status === "settled" && <span className="badge badge-settled">Settled</span>}
@@ -87,30 +91,30 @@ function AuctionCard({ auction, onSettle }: { auction: Auction, onSettle: () => 
           </h3>
         )}
         <p style={{ fontSize:13, color:"#64748b", marginBottom:14 }}>
-          Seller: {auction.seller.slice(0,8)}…
+          {auction.status === "settled" ? "Seller" : "Seller"}: {String(auction.seller).slice(0,8)}…
         </p>
 
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
           <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:8, padding:"10px 12px" }}>
             <div style={{ fontSize:11, color:"#64748b", fontWeight:600, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>
-              {auction.auctionType === "forward" ? "Current Bid" : "Lowest Bid"}
+              {auction.status === "settled" ? "Final Price" : auction.auctionType === "forward" ? "Current Bid" : "Lowest Bid"}
             </div>
-            <div style={{ fontSize:18, fontWeight:800, color:"#6366f1", fontFamily:"'Space Grotesk',sans-serif" }}>
+            <div style={{ fontSize:18, fontWeight:800, color: auction.status === "settled" ? "#10b981" : "#6366f1", fontFamily:"'Space Grotesk',sans-serif" }}>
               {auction.currentBestBid > 0 ? `${formatAPT(auction.currentBestBid)} APT` : "No bids"}
             </div>
           </div>
           <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:8, padding:"10px 12px" }}>
             <div style={{ fontSize:11, color:"#64748b", fontWeight:600, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>
-              Time Left
+              {auction.status === "settled" ? "Status" : "Time Left"}
             </div>
-            <div className={`countdown ${isUrgent ? "urgent" : ""}`} style={{ fontSize:18, fontWeight:800, fontFamily:"'Space Grotesk',sans-serif" }}>
-              {timer}
+            <div className={`countdown ${isUrgent ? "urgent" : ""}`} style={{ fontSize:18, fontWeight:800, fontFamily:"'Space Grotesk',sans-serif", color: auction.status === "settled" ? "#10b981" : undefined }}>
+              {auction.status === "settled" ? "Settled ✓" : timer}
             </div>
           </div>
         </div>
 
         {/* Action Button */}
-        {auction.status === "active" && isExpired ? (
+        {auction.status === "active" && isExpired && isCreator ? (
           <button 
             className="btn btn-primary" 
             style={{ width: "100%", marginTop: 8, height: 40, fontSize: 14 }}

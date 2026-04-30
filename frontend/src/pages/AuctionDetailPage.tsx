@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, TrendingUp, Shield, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
-import { timeRemaining, formatAPT, simulateBid, shortAddress, aptosClient, fetchAllAuctions } from "../hooks/useAptos";
+import { timeRemaining, formatAPT, simulateBid, shortAddress, aptosClient, fetchAllAuctions, normalizeAddress } from "../hooks/useAptos";
 import type { Auction, SimulationResult } from "../types";
 import { WalletContext } from "../App";
 import { OCTAS_PER_APT, CONTRACT_ADDRESS, STORE_OWNER_ADDRESS } from "../config";
@@ -140,6 +140,7 @@ export default function AuctionDetailPage() {
   const isActive = auction.status === "active";
   const isForward = auction.auctionType === "forward";
   const isUrgent = auction.endTime - Date.now()/1000 < 300;
+  const isExpired = auction.endTime - Date.now()/1000 <= 0;
   
   const minBid = isForward 
     ? (auction.currentBestBid > 0 ? auction.currentBestBid * 1.05 : auction.startingPrice)
@@ -148,7 +149,7 @@ export default function AuctionDetailPage() {
   async function handleBid() {
     if (!connected) { connect(); return; }
     // Prevent self-bidding
-    if (address && auction.seller && address.toLowerCase() === auction.seller.toLowerCase()) {
+    if (address && auction.seller && normalizeAddress(address) === normalizeAddress(auction.seller)) {
       setTxStatus("error");
       setTxMsg("You cannot bid on your own auction.");
       return;
@@ -254,7 +255,7 @@ export default function AuctionDetailPage() {
                 )}
 
                 {/* Anti-bot info */}
-                <div className="card" style={{ padding:20, marginTop:20 }}>
+                {/* <div className="card" style={{ padding:20, marginTop:20 }}>
                   <h4 style={{ fontSize:15, fontWeight:700, marginBottom:14, display:"flex", alignItems:"center", gap:8 }}>
                     <Shield size={15} color="#6366f1"/> Network Protections Active
                   </h4>
@@ -272,7 +273,7 @@ export default function AuctionDetailPage() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </div> */}
               </div>
             )}
 
@@ -295,8 +296,8 @@ export default function AuctionDetailPage() {
               {/* Status + timer */}
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
                 <div>
-                  <span className={`badge ${isActive ? (isUrgent ? "badge-ending" : "badge-active") : "badge-settled"}`}>
-                    {isActive ? (isUrgent ? "Ending Soon" : "Live") : "Settled"}
+                  <span className={`badge ${isActive ? (isExpired ? "badge-expired" : isUrgent ? "badge-ending" : "badge-active") : "badge-settled"}`}>
+                    {isActive ? (isExpired ? "Ended" : isUrgent ? "Ending Soon" : "Live") : "Settled"}
                   </span>
                   <span className={`badge badge-${auction.auctionType}`} style={{ marginLeft:6 }}>
                     {auction.auctionType === "forward" ? "Forward" : "Reverse"}
@@ -330,11 +331,11 @@ export default function AuctionDetailPage() {
               <div className="divider"/>
 
               {/* Bid form */}
-              {isActive ? (
+              {isActive && !isExpired ? (
                 <>
                   {/* Self-bid guard */}
                   {connected && address && auction.seller &&
-                   address.toLowerCase() === auction.seller.toLowerCase() ? (
+                   normalizeAddress(address) === normalizeAddress(auction.seller) ? (
                     <div className="alert alert-warning" style={{ margin: "16px 0" }}>
                       <AlertTriangle size={14}/> You are the seller of this auction and cannot place a bid.
                     </div>
@@ -377,13 +378,24 @@ export default function AuctionDetailPage() {
                     </>
                   )}
                 </>
-              ) : (
+              ) : auction.status === "settled" ? (
                 <div style={{ textAlign:"center", padding:"24px 0" }}>
-                  <h3 style={{ fontWeight:700, marginBottom:8 }}>Auction Settled</h3>
-                  <p style={{ color:"#64748b", fontSize:14 }}>
-                    Winner: {shortAddress(auction.bestBidder)}<br/>
-                    Winning bid: {formatAPT(auction.currentBestBid)} APT
+                  <div style={{ fontSize:40, marginBottom:8 }}>🏆</div>
+                  <h3 style={{ fontWeight:700, marginBottom:8, color:"#f1f5f9" }}>Auction Settled</h3>
+                  <p style={{ color:"#64748b", fontSize:14, lineHeight:1.6 }}>
+                    {auction.bestBidder && auction.bestBidder !== "0x0" ? (
+                      <>
+                        Winner: <span style={{ color:"#6366f1", fontWeight:600 }}>{shortAddress(auction.bestBidder)}</span><br/>
+                        Winning bid: <span style={{ color:"#10b981", fontWeight:700 }}>{formatAPT(auction.currentBestBid)} APT</span>
+                      </>
+                    ) : (
+                      "No bids placed. NFT returned to seller."
+                    )}
                   </p>
+                </div>
+              ) : (
+                <div style={{ textAlign:"center", padding:"24px 0", color:"#64748b" }}>
+                  <p>This auction has expired and is pending settlement.</p>
                 </div>
               )}
 

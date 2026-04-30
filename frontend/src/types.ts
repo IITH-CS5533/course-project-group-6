@@ -25,6 +25,7 @@ export interface Auction {
   auctionType: AuctionType;
   seller: string;
   nftId: number;
+  nftOwner?: string;                 // current owner of the NFT (winner after settlement)
   nftMetadata?: NFTMetadata;        // enriched client-side
   requirementDescription: string;   // for reverse auctions
   startingPrice: number;

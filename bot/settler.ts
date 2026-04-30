@@ -4,16 +4,16 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 // --- Configuration ---
-const CONTRACT_ADDRESS = "0xca646abf3f6ec2a43661abed7035410c81ce7ac74d0c70888ae4f24173070918";
-const STORE_OWNER_ADDRESS = "0xca646abf3f6ec2a43661abed7035410c81ce7ac74d0c70888ae4f24173070918";
-const PRIVATE_KEY_STR = process.env.BOT_PRIVATE_KEY || ""; 
+const CONTRACT_ADDRESS = process.env.BOT_CONTRACT_ADDRESS || "";
+const STORE_OWNER_ADDRESS = process.env.BOT_STORE_OWNER_ADDRESS || "";
+const PRIVATE_KEY_STR = process.env.BOT_PRIVATE_KEY || "";
 
 if (!PRIVATE_KEY_STR) {
   console.error("ERROR: BOT_PRIVATE_KEY not found in .env file");
   process.exit(1);
 }
 
-const config = new AptosConfig({ network: Network.DEVNET });
+const config = new AptosConfig({ network: Network.TESTNET });
 const client = new Aptos(config);
 
 // Initialize account from private key using the new v1 SDK format
@@ -71,8 +71,14 @@ async function runSettler() {
             transaction,
           });
 
-          console.log(`Auction #${i} settled! Transaction: ${committedTxn.hash}`);
-          await client.waitForTransaction({ transactionHash: committedTxn.hash });
+          const response = await client.waitForTransaction({ transactionHash: committedTxn.hash });
+          if ((response as any).success) {
+            console.log(`Auction #${i} settled successfully! Transaction: ${committedTxn.hash}`);
+          } else {
+            console.error(`Auction #${i} settlement FAILED on-chain.`);
+            console.error(`Hash: ${committedTxn.hash}`);
+            console.error(`Reason: ${(response as any).vm_status}`);
+          }
         }
       } catch (e: any) {
         // Skip individual errors

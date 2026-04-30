@@ -21,14 +21,16 @@ export const aptosClient = new Aptos(
  * Normalizes an Aptos address to a standard long format with leading zeros.
  * This ensures "0x1" correctly matches "0x00...01" during comparisons.
  */
-export function normalizeAddress(addr: string): string {
-  if (!addr || addr === "0x0") return "0x0";
+export function normalizeAddress(addr: any): string {
+  if (!addr) return "0x0";
+  const str = typeof addr === "string" ? addr : addr.toString();
+  if (str === "0x0") return "0x0";
+  
   try {
-    // Remove 0x prefix, pad to 64 chars, add 0x back
-    const clean = addr.startsWith("0x") ? addr.slice(2) : addr;
+    const clean = str.startsWith("0x") ? str.slice(2) : str;
     return "0x" + clean.toLowerCase().padStart(64, "0");
   } catch {
-    return addr.toLowerCase();
+    return str.toLowerCase();
   }
 }
 
@@ -36,14 +38,17 @@ export function normalizeAddress(addr: string): string {
 
 export async function fetchUserNFTs(address: string): Promise<NFTMetadata[]> {
   try {
-    const resource = await aptosClient.getAccountResource({
-      accountAddress: address,
-      resourceType: `${CONTRACT_ADDRESS}::nft::NFTCollection`
-    });
+    // Use direct REST API to avoid SDK response-wrapping ambiguity
+    // The REST endpoint /accounts/{addr}/resource/{type} returns { type, data: { nfts: [...] } }
+    const url = `${APTOS_NODE_URL}/accounts/${address}/resource/${encodeURIComponent(CONTRACT_ADDRESS + "::nft::NFTCollection")}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      // 404 = no collection initialized yet — not an error
+      return [];
+    }
+    const json = await resp.json();
+    const nftsRaw: any[] = json?.data?.nfts ?? [];
 
-    const data = resource as any;
-    const nftsRaw = data?.nfts || [];
-    
     const nfts: NFTMetadata[] = nftsRaw.map((n: any) => ({
       id: Number(n.id),
       name: n.name,
@@ -52,36 +57,12 @@ export async function fetchUserNFTs(address: string): Promise<NFTMetadata[]> {
       creator: n.creator,
       owner: address,
       createdAt: Number(n.created_at),
-      inAuction: Boolean(n.in_auction)
+      inAuction: Boolean(n.in_auction),
     }));
-
-    // Refined override to support legacy auctions (created before the contract fix)
-    // We match by ID AND Creator to distinguish between collided IDs (e.g. two Token #0s)
-    try {
-      const allAuctions = await fetchAllAuctions();
-      const normalizedUserAddr = normalizeAddress(address);
-      
-      const activeAuctionKeys = new Set(
-         allAuctions
-           .filter(a => a.status === "active" && a.auctionType === "forward" && normalizeAddress(a.seller) === normalizedUserAddr)
-           .map(a => `${a.nftId}-${normalizeAddress(a.nftMetadata?.creator || "")}`)
-      );
-
-      for (const nft of nfts) {
-        const nftKey = `${nft.id}-${normalizeAddress(nft.creator)}`;
-        if (activeAuctionKeys.has(nftKey)) {
-          nft.inAuction = true;
-        } else if (nft.inAuction) {
-          nft.inAuction = false;
-        }
-      }
-    } catch (e) {
-      console.warn("Could not cross-reference active auctions", e);
-    }
 
     return nfts;
   } catch {
-    console.warn("Contract not deployed or error fetching NFTs");
+    // Network error — silently return empty
     return [];
   }
 }
@@ -125,30 +106,46 @@ export async function fetchAllAuctions(): Promise<Auction[]> {
         const auctionType = Number(info[0]) === 0 ? "forward" : "reverse";
         const seller = info[1] as string;
         const nftId = Number(info[2]);
+        const bestBidder = info[5] as string;
+        const isSettled = statusNum === 1;
 
         let nftMetadata: NFTMetadata | undefined;
+        // After settlement, NFT is transferred to winner — try seller first, then winner
+        let nftOwner: string | undefined;
 
         if (auctionType === "forward") {
-          try {
-            const nftInfo = await aptosClient.view({
-              payload: {
-                function: `${CONTRACT_ADDRESS}::nft::get_nft_info`,
-                typeArguments: [],
-                functionArguments: [seller, nftId],
-              },
-            });
-            nftMetadata = {
-              id: nftId,
-              name: nftInfo[0] as string,
-              description: nftInfo[1] as string,
-              imageUrl: nftInfo[2] as string,
-              creator: nftInfo[3] as string,
-              owner: seller,
-              createdAt: Number(nftInfo[5]),
-              inAuction: true,
-            };
-          } catch (e) {
-            console.error(`Failed to fetch NFT info for auction ${i}`, e);
+          // Try seller first (active auction or no bids)
+          const addressesToTry = [seller];
+          if (isSettled && bestBidder && bestBidder !== "0x0") {
+            addressesToTry.push(bestBidder);
+          }
+
+          for (const ownerAddr of addressesToTry) {
+            try {
+              // Use REST API to fetch the whole NFTCollection and find the NFT by id
+              const collectionUrl = `${APTOS_NODE_URL}/accounts/${ownerAddr}/resource/${encodeURIComponent(CONTRACT_ADDRESS + "::nft::NFTCollection")}`;
+              const collRes = await fetch(collectionUrl);
+              if (!collRes.ok) continue;
+              const collJson = await collRes.json();
+              const allNfts: any[] = collJson?.data?.nfts ?? [];
+              const found = allNfts.find((n: any) => Number(n.id) === nftId);
+              if (found) {
+                nftMetadata = {
+                  id: nftId,
+                  name: found.name,
+                  description: found.description,
+                  imageUrl: found.image_url,
+                  creator: found.creator,
+                  owner: ownerAddr,
+                  createdAt: Number(found.created_at),
+                  inAuction: !isSettled,
+                };
+                nftOwner = ownerAddr;
+                break;
+              }
+            } catch {
+              // not found at this address, try next
+            }
           }
         }
 
@@ -173,8 +170,6 @@ export async function fetchAllAuctions(): Promise<Auction[]> {
               }
            });
            const bidCount = Number(bidCountRaw[0]);
-           // We might need an actual function in the contract to get bid history,
-           // but for MVP we will synthesize the last bid based on the current best.
            if (bidCount > 0 && Number(info[4]) > 0 && info[5] !== "0x0") {
              bidHistory = [{
                  bidder: info[5] as string,
@@ -189,6 +184,7 @@ export async function fetchAllAuctions(): Promise<Auction[]> {
           auctionType,
           seller,
           nftId,
+          nftOwner,
           requirementDescription,
           startingPrice: Number(info[3]),
           currentBestBid: Number(info[4]),

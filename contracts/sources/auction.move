@@ -344,6 +344,9 @@ module fair_auction::auction {
         assert!(now < auction.end_time, E_AUCTION_ENDED);
         assert!(auction.auction_type == AUCTION_TYPE_FORWARD, E_AUCTION_NOT_FOUND);
 
+        // Ensure bidder has an NFT collection initialized (to avoid settlement failure)
+        assert!(fair_auction::nft::has_collection(bidder_addr), E_NOT_INITIALIZED);
+
         // Bid validation
         let min_next_bid = if (auction.current_best_bid == 0) {
             auction.starting_price
@@ -514,7 +517,7 @@ module fair_auction::auction {
         store_owner: address,
         auction_id: u64,
     ) acquires AuctionStore {
-        let _ = signer::address_of(caller);
+        let caller_addr = signer::address_of(caller);
         let now = timestamp::now_seconds();
 
         let store = borrow_global_mut<AuctionStore>(store_owner);
@@ -526,6 +529,9 @@ module fair_auction::auction {
         assert!(auction.status == STATUS_ACTIVE, E_ALREADY_SETTLED);
         assert!(now >= auction.end_time, E_AUCTION_NOT_ENDED);
         assert!(auction.auction_type == AUCTION_TYPE_FORWARD, E_AUCTION_NOT_FOUND);
+
+        // Only creator OR store owner (admin/bot) can settle
+        assert!(caller_addr == auction.seller || caller_addr == store_owner, E_NOT_OWNER);
 
         auction.status = STATUS_SETTLED;
 
@@ -567,7 +573,7 @@ module fair_auction::auction {
         store_owner: address,
         auction_id: u64,
     ) acquires AuctionStore {
-        let _ = signer::address_of(caller);
+        let caller_addr = signer::address_of(caller);
         let now = timestamp::now_seconds();
 
         let store = borrow_global_mut<AuctionStore>(store_owner);
@@ -579,6 +585,9 @@ module fair_auction::auction {
         assert!(auction.status == STATUS_ACTIVE, E_ALREADY_SETTLED);
         assert!(now >= auction.end_time, E_AUCTION_NOT_ENDED);
         assert!(auction.auction_type == AUCTION_TYPE_REVERSE, E_AUCTION_NOT_FOUND);
+
+        // Only creator OR store owner (admin/bot) can settle
+        assert!(caller_addr == auction.seller || caller_addr == store_owner, E_NOT_OWNER);
 
         auction.status = STATUS_SETTLED;
 
