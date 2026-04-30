@@ -1,0 +1,43 @@
+"I am working on the second half of an Aptos Move marketplace project. Till now, I have handled the vault and forward auction. Here is our project scope: ."
+
+"I want you to develop the NFT part of the application — including frontend, backend, and everything related to NFTs."
+
+"Give me commands for my blockchain application for all features like NFTs, auction creation, etc., to view, add, and modify. Provide a proper document listing all these commands."
+
+"I have a doubt. You created an account and kept it in config.ts — what exactly is it, how do we create it, and how is it different from the user wallet I created and am using in the frontend?"
+
+"My frontend is not displaying the NFTs I created. It shows 0, but when I check using the command line it shows 1. Fix this — I am unable to see my NFTs."
+
+"NFT transfer is not happening."
+
+"Now let's implement the Reverse Auction logic in auction.move and its corresponding frontend. A buyer should be able to post a requirement and deposit a budget, and sellers should compete by placing lower bids."
+
+"For reverse auction, the UI is not proper. Instead of showing min decrement, it shows min increment. Suggest and fix accordingly."
+
+"Here it should show min bid decrement. Also, in the config file, there should be two separate variables for hard caps in the database."
+
+"Reverse auction bidding is not working."
+
+"After transferring an NFT, the pop-up should disappear. Also, after creating an NFT/auction, the form should reset and redirect to the previous page, showing a success pop-up. Self-bidding should not be allowed. Make these changes."
+
+"Improve the UI for displaying time."
+
+"In the dashboard, it is not showing the auctions created by that user. Fix this and make the dashboard proper."
+
+"Let's build an off-chain bot (Automation Layer) to continuously monitor active auctions and trigger settlement when current_time >= auction_end_time."
+
+"How to update the private key in the .env file for the bot? Where do we get it?" (Follow up: "See the .env file, it exists.")
+
+"The settle button is not present in the UI. Implement it."
+
+"The settle auction button is not working. It should only be allowed for the auction creator."
+
+"The bot is settling auctions multiple times. Fix this"
+
+"After auction ends and settlement happens, in my NFTs it is still showing 'currently in auction'."
+
+"Auction has ended, but tags are incorrect — it still shows 'ending soon'."
+
+"Settlement happened, but images in the marketplace are not loading — it shows 'image not there'. Also, there seem to be frontend errors. Fix all of them."
+
+"How to fix this 'too many requests' error? It is occurring very frequently."
