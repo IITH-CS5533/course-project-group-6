@@ -1,0 +1,41 @@
+"This is our project scope for an intro to blockchain programming course. We have to use Move with Aptos. Plan the project phases and steps, since I am new to this field plan it properly without missing any state, so I can start my project. Our project scope: "
+
+"This is my tentative plan. First, let's try to see what libraries or tech stack I need to use for both the blockchain smart contracts and the complete frontend application."
+
+"Let's first see all installations and settings required to do the project."
+
+"I downloaded the Petra Aptos wallet extension. Next, what to do? How do I create a new wallet and get free Aptos tokens?"
+
+"When I clone the GitHub newly, how to run it on another laptop for the first time??"
+
+"How to re-run both backend and frontend in general if we make any changes? Give a commands list and save it to a new file."
+
+"In the frontend, read the address from the .env and also the network."
+
+"Let's start writing the Move smart contracts. Based on the scope, please write the vault.move and config.move modules first."
+
+"Now let's write the auction.move module, specifically focusing on the Forward Auction logic (creating the auction, placing bids, validating increments, and refunding the previous highest bidder)."
+
+"In config.move there are parameters that are set by the admin account, but I feel many of them should be customizable per auction by the auction creator, and those values should be hard-capped by the admin from this config. Change it accordingly."
+
+"While creating an auction, the auction duration is not customizable. Make it customizable."
+
+"What is the max extension unit??"
+
+"Give me the command for how to test, compile, and publish."
+
+"How do I test my application? First, I want to know whether my smart contract logic is working or not, whether I am able to create NFTs and see them, etc. And also I want to test it from the frontend."
+
+"How to check the coverage of tests?"
+
+"Increase the coverage, write more test cases."
+
+"Write test cases to cover the config.move logic."
+
+"Is publishing happening in devnet only right??"
+
+"Now we are running in devnet right?? What are the steps to shift to testnet?? What are all the differences in Testnet VS Devnet, is it like hosting from localhost to actual server?? Are there any restrictions on gas, coins?"
+
+"Ok, if I created a testnet and want to run in another laptop, will it work for the same network or should I collect coins again?"
+
+"How much APT should be there in my account to demonstrate all these features of my website? Note I also have a bot to settle the auction."

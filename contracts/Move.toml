@@ -7,9 +7,6 @@ authors = ["Group 6"]
 fair_auction = "_"
 admin = "_"
 
-[dev-addresses]
-fair_auction = "0xCAFE1"
-admin = "0xCAFE2"
 
 [dependencies.AptosFramework]
 git = "https://github.com/aptos-labs/aptos-framework.git"

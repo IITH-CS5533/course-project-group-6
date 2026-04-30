@@ -36,6 +36,9 @@ module fair_auction::nft {
     /// Holds all NFTs owned by a single account
     struct NFTCollection has key {
         nfts: vector<NFT>,
+    }
+
+    struct GlobalState has key {
         next_id: u64,
     }
 
@@ -67,8 +70,21 @@ module fair_auction::nft {
         assert!(!exists<NFTCollection>(addr), E_ALREADY_INITIALIZED);
         move_to(account, NFTCollection {
             nfts: vector::empty<NFT>(),
-            next_id: 0,
         });
+
+        // Initialize global state if it doesn't exist (on first use)
+        // In a real app, this would be a separate admin-only initialization
+        if (!exists<GlobalState>(@fair_auction)) {
+            // This is a simplification; usually you'd have a dedicated admin setup
+        };
+    }
+
+    public entry fun initialize_global(admin: &signer) {
+        let addr = signer::address_of(admin);
+        assert!(addr == @fair_auction, 100); // Only deployer
+        if (!exists<GlobalState>(addr)) {
+            move_to(admin, GlobalState { next_id: 0 });
+        }
     }
 
     // ─── Mint ─────────────────────────────────────────────────────────────────
@@ -79,7 +95,7 @@ module fair_auction::nft {
         name: String,
         description: String,
         image_url: String,
-    ) acquires NFTCollection {
+    ) acquires NFTCollection, GlobalState {
         assert!(string::length(&name) > 0, E_EMPTY_NAME);
         assert!(string::length(&image_url) > 0, E_EMPTY_IMAGE_URL);
 
@@ -89,12 +105,14 @@ module fair_auction::nft {
         if (!exists<NFTCollection>(addr)) {
             move_to(account, NFTCollection {
                 nfts: vector::empty<NFT>(),
-                next_id: 0,
             });
         };
 
         let collection = borrow_global_mut<NFTCollection>(addr);
-        let nft_id = collection.next_id;
+        
+        let global_state = borrow_global_mut<GlobalState>(@fair_auction);
+        let nft_id = global_state.next_id;
+        global_state.next_id = nft_id + 1;
 
         let nft = NFT {
             id: nft_id,
@@ -108,7 +126,6 @@ module fair_auction::nft {
         };
 
         vector::push_back(&mut collection.nfts, nft);
-        collection.next_id = nft_id + 1;
 
         event::emit(NFTMintedEvent {
             nft_id,
@@ -180,6 +197,24 @@ module fair_auction::nft {
         assert!(found, E_NFT_NOT_FOUND);
         let nft = vector::borrow_mut(&mut collection.nfts, idx);
         nft.in_auction = false;
+    }
+
+    /// Unlocks and transfers NFT to winner (friend only).
+    public(friend) fun finalize_settlement(owner: address, winner: address, nft_id: u64) acquires NFTCollection {
+        let from_collection = borrow_global_mut<NFTCollection>(owner);
+        let (found, idx) = find_nft_index(&from_collection.nfts, nft_id);
+        assert!(found, 2);
+
+        let nft = vector::remove(&mut from_collection.nfts, idx);
+        nft.in_auction = false;
+        nft.owner = winner;
+
+        // If winner doesn't have a collection, we have to abort because we can't create one for them
+        // without their signer. Bidders must initialize their collection before bidding.
+        assert!(exists<NFTCollection>(winner), E_COLLECTION_NOT_FOUND);
+
+        let to_collection = borrow_global_mut<NFTCollection>(winner);
+        vector::push_back(&mut to_collection.nfts, nft);
     }
 
     /// Removes an NFT from owner's collection and returns it (for vault deposit).

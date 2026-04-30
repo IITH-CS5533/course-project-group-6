@@ -1,6 +1,6 @@
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk";
 async function test() {
-  const aptosClient = new Aptos(new AptosConfig({ network: Network.DEVNET }));
+  const aptosClient = new Aptos(new AptosConfig({ network: Network.TESTNET }));
   try {
     const resource = await aptosClient.getAccountResource({
       accountAddress: "0x7ef6d9eb0d5608de2224950e8e8333218d55635f6eb13c70bc7f617d18f8fb61",

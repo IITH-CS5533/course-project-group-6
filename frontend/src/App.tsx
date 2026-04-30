@@ -5,6 +5,8 @@ import "./index.css";
 
 // Pages
 import MarketplacePage from "./pages/MarketplacePage";
+import AuctionDetailPage from "./pages/AuctionDetailPage";
+import CreateAuctionPage from "./pages/CreateAuctionPage";
 import MintNFTPage from "./pages/MintNFTPage";
 import DashboardPage from "./pages/DashboardPage";
 import MyNFTsPage from "./pages/MyNFTsPage";
@@ -24,6 +26,7 @@ function Navbar() {
   const links = [
     { to: "/", label: "Marketplace", icon: <LayoutGrid size={16}/> },
     { to: "/my-nfts", label: "My NFTs", icon: <Gavel size={16}/> },
+    { to: "/create-auction", label: "Create Auction", icon: <PlusCircle size={16}/> },
     { to: "/mint", label: "Mint NFT", icon: <Zap size={16}/> },
     { to: "/dashboard", label: "Dashboard", icon: <User size={16}/> },
   ];
@@ -150,6 +153,8 @@ function AppContent() {
         <Navbar/>
         <Routes>
           <Route path="/" element={<MarketplacePage/>}/>
+          <Route path="/auction/:id" element={<AuctionDetailPage/>}/>
+          <Route path="/create-auction" element={<CreateAuctionPage/>}/>
           <Route path="/mint" element={<MintNFTPage/>}/>
           <Route path="/dashboard" element={<DashboardPage/>}/>
           <Route path="/my-nfts" element={<MyNFTsPage/>}/>

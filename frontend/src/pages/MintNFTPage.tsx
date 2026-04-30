@@ -14,6 +14,7 @@ export default function MintNFTPage() {
   const [status, setStatus] = useState<"idle"|"pending"|"success"|"error">("idle");
   const [msg, setMsg] = useState("");
   const [preview, setPreview] = useState<string|null>(null);
+  const [toast, setToast] = useState<string|null>(null);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement>) {
     const { name, value } = e.target;
@@ -43,6 +44,12 @@ export default function MintNFTPage() {
       setStatus("success");
       setMsg(`Asset "${form.name}" successfully minted and stored in your account.`);
       setForm({ name:"", description:"", imageUrl:"" }); // reset form
+      setPreview(null);
+      setToast(`NFT "${form.name}" minted successfully!`);
+      setTimeout(() => {
+        setToast(null);
+        navigate(-1); // go back to previous page
+      }, 2000);
     } catch (err: any) {
       console.error(err);
       setStatus("error");
@@ -52,6 +59,19 @@ export default function MintNFTPage() {
 
   return (
     <div className="page">
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
+          zIndex: 200, minWidth: 320, maxWidth: 480,
+          background: "linear-gradient(135deg,#10b981,#059669)",
+          color: "white", padding: "14px 24px", borderRadius: 12,
+          fontWeight: 700, fontSize: 15, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span>✓</span> {toast}
+        </div>
+      )}
       <div className="container" style={{ maxWidth:700 }}>
         <div style={{ textAlign:"center", marginBottom:40 }}>
           <h1 style={{ fontSize:32, fontWeight:900, marginBottom:8 }}>
