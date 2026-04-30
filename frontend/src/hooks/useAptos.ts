@@ -15,6 +15,23 @@ export const aptosClient = new Aptos(
   new AptosConfig({ network: networkMap[NETWORK] || Network.TESTNET })
 );
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Normalizes an Aptos address to a standard long format with leading zeros.
+ * This ensures "0x1" correctly matches "0x00...01" during comparisons.
+ */
+export function normalizeAddress(addr: string): string {
+  if (!addr || addr === "0x0") return "0x0";
+  try {
+    // Remove 0x prefix, pad to 64 chars, add 0x back
+    const clean = addr.startsWith("0x") ? addr.slice(2) : addr;
+    return "0x" + clean.toLowerCase().padStart(64, "0");
+  } catch {
+    return addr.toLowerCase();
+  }
+}
+
 // ─── NFT Functions ─────────────────────────────────────────────────────────────
 
 export async function fetchUserNFTs(address: string): Promise<NFTMetadata[]> {
@@ -38,18 +55,24 @@ export async function fetchUserNFTs(address: string): Promise<NFTMetadata[]> {
       inAuction: Boolean(n.in_auction)
     }));
 
-    // Dynamically override inAuction state because the scaffold contract omits lock_for_auction calls
+    // Refined override to support legacy auctions (created before the contract fix)
+    // We match by ID AND Creator to distinguish between collided IDs (e.g. two Token #0s)
     try {
       const allAuctions = await fetchAllAuctions();
-      const activeAuctionNftIds = new Set(
+      const normalizedUserAddr = normalizeAddress(address);
+      
+      const activeAuctionKeys = new Set(
          allAuctions
-           .filter(a => a.status === "active" && a.auctionType === "forward" && a.seller === address)
-           .map(a => a.nftId)
+           .filter(a => a.status === "active" && a.auctionType === "forward" && normalizeAddress(a.seller) === normalizedUserAddr)
+           .map(a => `${a.nftId}-${normalizeAddress(a.nftMetadata?.creator || "")}`)
       );
 
       for (const nft of nfts) {
-        if (activeAuctionNftIds.has(nft.id)) {
+        const nftKey = `${nft.id}-${normalizeAddress(nft.creator)}`;
+        if (activeAuctionKeys.has(nftKey)) {
           nft.inAuction = true;
+        } else if (nft.inAuction) {
+          nft.inAuction = false;
         }
       }
     } catch (e) {
@@ -188,6 +211,24 @@ export async function fetchAllAuctions(): Promise<Auction[]> {
   }
 }
 
+export async function settleForwardAuction(signAndSubmitTransaction: any, auctionId: number) {
+  const payload = {
+    function: `${CONTRACT_ADDRESS}::auction::settle_forward_auction`,
+    typeArguments: [],
+    functionArguments: [STORE_OWNER_ADDRESS, auctionId],
+  };
+  return await signAndSubmitTransaction(payload);
+}
+
+export async function settleReverseAuction(signAndSubmitTransaction: any, auctionId: number) {
+  const payload = {
+    function: `${CONTRACT_ADDRESS}::auction::settle_reverse_auction`,
+    typeArguments: [],
+    functionArguments: [STORE_OWNER_ADDRESS, auctionId],
+  };
+  return await signAndSubmitTransaction(payload);
+}
+
 // ─── Simulation ────────────────────────────────────────────────────────────────
 
 export function simulateBid(auction: Auction, bidAmount: number, userAddress: string): SimulationResult {
@@ -209,12 +250,21 @@ export function simulateBid(auction: Auction, bidAmount: number, userAddress: st
   }
 
   const minBidIncBps = 500; // 5% – from admin config
-  const minNextBid =
-    auction.currentBestBid === 0
+  const isForward = auction.auctionType === "forward";
+  
+  let minNextBid: number;
+  if (isForward) {
+    minNextBid = auction.currentBestBid === 0
       ? auction.startingPrice
       : auction.currentBestBid + Math.floor((auction.currentBestBid * minBidIncBps) / 10000);
+  } else {
+    // Reverse Auction: Next bid must be lower
+    minNextBid = auction.currentBestBid === 0
+      ? auction.startingPrice
+      : auction.currentBestBid - Math.floor((auction.currentBestBid * minBidIncBps) / 10000);
+  }
 
-  const bidTooLow = bidAmount < minNextBid;
+  const bidTooLow = isForward ? bidAmount < minNextBid : bidAmount > minNextBid;
 
   const speedBumpSeconds = 120;
   const extensionSeconds = 300;
@@ -249,7 +299,7 @@ export function simulateBid(auction: Auction, bidAmount: number, userAddress: st
     minNextBid,
     bidFee: 1_000_000,
     reason: bidTooLow
-      ? `Minimum bid is ${formatAPT(minNextBid)} APT`
+      ? (isForward ? `Minimum bid is ${formatAPT(minNextBid)} APT` : `Maximum offer is ${formatAPT(minNextBid)} APT`)
       : cooldownViolation
       ? "Please wait for your cooldown period"
       : undefined,

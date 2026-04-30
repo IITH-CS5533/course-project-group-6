@@ -14,10 +14,13 @@ export default function CreateAuctionPage() {
   const [searchParams] = useSearchParams();
   const initialNftId = searchParams.get("nftId") || "";
   
+  const [auctionType, setAuctionType] = useState<"forward"|"reverse">(initialNftId ? "forward" : "forward");
   const [myNfts, setMyNfts] = useState<NFTMetadata[]>([]);
   const [form, setForm] = useState({
     nftId: initialNftId,
     startingPrice: "",
+    requirement: "",
+    maxBudget: "",
   });
   const [duration, setDuration] = useState({ d: 1, h: 0, m: 0, s: 0 });
   const [advanced, setAdvanced] = useState({
@@ -31,6 +34,7 @@ export default function CreateAuctionPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState<"idle"|"pending"|"success"|"error">("idle");
   const [msg, setMsg] = useState("");
+  const [toast, setToast] = useState<string|null>(null);
 
   useEffect(() => {
     if (connected && address) {
@@ -61,6 +65,7 @@ export default function CreateAuctionPage() {
     setMsg("Awaiting transaction signature in Petra.");
     
     try {
+      const isForward = auctionType === "forward";
       const totalSeconds = duration.d * 86400 + duration.h * 3600 + duration.m * 60 + duration.s;
       
       if (totalSeconds < 60) {
@@ -69,23 +74,37 @@ export default function CreateAuctionPage() {
         return;
       }
 
-      const functionArguments = [
-        STORE_OWNER_ADDRESS, 
-        ADMIN_ADDRESS, 
-        form.nftId, 
-        Math.floor(parseFloat(form.startingPrice) * OCTAS_PER_APT), 
-        totalSeconds,
-        Math.floor(parseFloat(advanced.minBidInc) * 100),
-        parseInt(advanced.cooldown),
-        parseInt(advanced.maxBids),
-        parseInt(advanced.maxExt),
-        parseInt(advanced.speedBump),
-        parseInt(advanced.extSecs)
-      ];
+      const functionArguments = isForward 
+        ? [
+            STORE_OWNER_ADDRESS, 
+            ADMIN_ADDRESS, 
+            form.nftId, 
+            Math.floor(parseFloat(form.startingPrice) * OCTAS_PER_APT), 
+            totalSeconds,
+            Math.floor(parseFloat(advanced.minBidInc) * 100),
+            parseInt(advanced.cooldown),
+            parseInt(advanced.maxBids),
+            parseInt(advanced.maxExt),
+            parseInt(advanced.speedBump),
+            parseInt(advanced.extSecs)
+          ]
+        : [
+            STORE_OWNER_ADDRESS, 
+            ADMIN_ADDRESS, 
+            form.requirement, 
+            Math.floor(parseFloat(form.maxBudget) * OCTAS_PER_APT), 
+            totalSeconds,
+            Math.floor(parseFloat(advanced.minBidInc) * 100),
+            parseInt(advanced.cooldown),
+            parseInt(advanced.maxBids),
+            parseInt(advanced.maxExt),
+            parseInt(advanced.speedBump),
+            parseInt(advanced.extSecs)
+          ];
 
       const payload = {
         data: {
-          function: `${CONTRACT_ADDRESS}::auction::create_forward_auction`,
+          function: `${CONTRACT_ADDRESS}::auction::${isForward ? 'create_forward_auction' : 'create_reverse_auction'}`,
           typeArguments: [],
           functionArguments
         }
@@ -98,6 +117,15 @@ export default function CreateAuctionPage() {
       
       setStatus("success");
       setMsg("Auction successfully created on the network.");
+      // Reset form
+      setForm({ nftId: "", startingPrice: "", requirement: "", maxBudget: "" });
+      setDuration({ d: 1, h: 0, m: 0, s: 0 });
+      const label = auctionType === "forward" ? "Forward Auction" : "Reverse Auction";
+      setToast(`${label} created successfully!`);
+      setTimeout(() => {
+        setToast(null);
+        navigate(-1); // go back to previous page
+      }, 2000);
     } catch (err: any) {
       console.error(err);
       setStatus("error");
@@ -109,16 +137,56 @@ export default function CreateAuctionPage() {
 
   return (
     <div className="page">
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
+          zIndex: 200, minWidth: 320, maxWidth: 480,
+          background: "linear-gradient(135deg,#10b981,#059669)",
+          color: "white", padding: "14px 24px", borderRadius: 12,
+          fontWeight: 700, fontSize: 15, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span>✓</span> {toast}
+        </div>
+      )}
       <div className="container" style={{ maxWidth:680 }}>
         <div style={{ textAlign:"center", marginBottom:40 }}>
           <h1 style={{ fontSize:32, fontWeight:900, marginBottom:8 }}>
             Create <span className="gradient-text">Auction</span>
           </h1>
           <p style={{ color:"#94a3b8" }}>
-            Launch a new NFT sale on-chain.
+            Launch a forward NFT sale or a reverse service auction on-chain.
           </p>
         </div>
+
+        {/* Type selector */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:32 }}>
+          {(["forward","reverse"] as const).map(t => (
+            <div key={t} onClick={() => setAuctionType(t)}
+              className="card"
+              style={{ padding:20, cursor:"pointer", textAlign:"center",
+                borderColor: auctionType===t ? "var(--accent)" : undefined,
+                boxShadow: auctionType===t ? "0 0 20px rgba(99,102,241,0.2)" : undefined,
+                transition:"all 0.2s" }}>
+              <div style={{ fontSize:36, marginBottom:10 }}>
+                {t==="forward" ? "Forward" : "Reverse"}
+              </div>
+              <h3 style={{ fontWeight:700, fontSize:16, marginBottom:6 }}>
+                {t==="forward" ? "Forward Auction" : "Reverse Auction"}
+              </h3>
+              <p style={{ fontSize:13, color:"#64748b", lineHeight:1.5 }}>
+                {t==="forward"
+                  ? "Sell your NFT. Highest bid wins."
+                  : "Post a service requirement. Lowest bid wins."}
+              </p>
+            </div>
+          ))}
+        </div>
+
         <form onSubmit={handleSubmit} style={{ display:"flex", flexDirection:"column", gap:20 }}>
+          {auctionType === "forward" && (
+            <>
               <div className="input-group">
                 <label>Select NFT to Sell *</label>
                 <select className="input" name="nftId" value={form.nftId} onChange={handle} required>
@@ -138,6 +206,27 @@ export default function CreateAuctionPage() {
                 <input className="input" type="number" name="startingPrice" min="0.01" step="0.01"
                   placeholder="1.00" value={form.startingPrice} onChange={handle} required/>
               </div>
+            </>
+          )}
+
+          {auctionType === "reverse" && (
+            <>
+              <div className="input-group">
+                <label>Service Requirement *</label>
+                <textarea className="input" name="requirement" rows={5}
+                  placeholder="Describe exactly what service you need, deliverables, timeline, quality expectations…"
+                  value={form.requirement} onChange={handle} required/>
+              </div>
+              <div className="input-group">
+                <label>Maximum Budget (APT) *</label>
+                <input className="input" type="number" name="maxBudget" min="0.01" step="0.01"
+                  placeholder="5.00" value={form.maxBudget} onChange={handle} required/>
+                <span style={{ fontSize:12, color:"#64748b" }}>
+                  This amount will be locked in the vault until auction settles.
+                </span>
+              </div>
+            </>
+          )}
 
           <div className="input-group">
             <label>Auction Duration *</label>
@@ -173,7 +262,7 @@ export default function CreateAuctionPage() {
             {showAdvanced && (
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:16 }}>
                 <div className="input-group">
-                  <label style={{ fontSize:12 }}>Min Bid Increment (%)</label>
+                  <label style={{ fontSize:12 }}>{auctionType === "forward" ? "Min Bid Increment (%)" : "Min Bid Decrement (%)"}</label>
                   <input className="input" type="number" step="0.1" name="minBidInc" value={advanced.minBidInc} onChange={handleAdvanced} required min="1"/>
                 </div>
                 <div className="input-group">

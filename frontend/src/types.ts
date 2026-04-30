@@ -11,7 +11,7 @@ export interface NFTMetadata {
   inAuction: boolean;
 }
 
-export type AuctionType = "forward";
+export type AuctionType = "forward" | "reverse";
 export type AuctionStatus = "active" | "settled" | "cancelled";
 
 export interface BidRecord {
@@ -26,6 +26,7 @@ export interface Auction {
   seller: string;
   nftId: number;
   nftMetadata?: NFTMetadata;        // enriched client-side
+  requirementDescription: string;   // for reverse auctions
   startingPrice: number;
   currentBestBid: number;
   bestBidder: string;
@@ -33,6 +34,7 @@ export interface Auction {
   extensionCount: number;
   status: AuctionStatus;
   bidHistory: BidRecord[];
+  buyerBudget: number;              // for reverse auctions
 }
 
 export interface UserDashboard {
@@ -70,4 +72,4 @@ export interface TransactionPayload {
 
 export type SortOption = "endTime" | "currentBid" | "startPrice" | "newest";
 export type FilterStatus = "all" | "active" | "settled";
-export type FilterType  = "all" | "forward";
+export type FilterType  = "all" | "forward" | "reverse";

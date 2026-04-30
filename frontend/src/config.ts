@@ -4,13 +4,13 @@
 export const NETWORK = "devnet"; // "mainnet" | "testnet" | "devnet"
 
 // The address that deployed (and owns) the contract modules
-export const CONTRACT_ADDRESS = "0x142a1f4c6b6f8e522b1098e8affe59643cb2e792efa193059616dac87a92eefc"; 
+export const CONTRACT_ADDRESS = "0x36c715cd33192e6d915d684e0ed2f97ff3ed8e32961dab9b980135d575b00098"; 
 
 // Admin address (holds AdminConfig and VaultRef)
-export const ADMIN_ADDRESS = "0x142a1f4c6b6f8e522b1098e8affe59643cb2e792efa193059616dac87a92eefc";
+export const ADMIN_ADDRESS = "0x36c715cd33192e6d915d684e0ed2f97ff3ed8e32961dab9b980135d575b00098";
 
 // The address holding the AuctionStore (same as contract deployer)
-export const STORE_OWNER_ADDRESS = "0x142a1f4c6b6f8e522b1098e8affe59643cb2e792efa193059616dac87a92eefc";
+export const STORE_OWNER_ADDRESS = "0x36c715cd33192e6d915d684e0ed2f97ff3ed8e32961dab9b980135d575b00098";
 
 // Aptos node endpoints
 export const APTOS_NODE_URL =

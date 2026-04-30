@@ -8,6 +8,7 @@
 ///   - Permissionless settlement
 module fair_auction::auction {
     use std::signer;
+    use std::string::String;
     use std::vector;
     use aptos_framework::event;
     use aptos_framework::timestamp;
@@ -29,10 +30,13 @@ module fair_auction::auction {
     const E_ALREADY_HIGHEST: u64        = 310;
     const E_CANNOT_DECREASE_BID: u64    = 311;
     const E_NO_BIDS: u64                = 312;
+    const E_REVERSE_ONLY_DECREASE: u64  = 313;
+    const E_INSUFFICIENT_BUDGET: u64    = 314;
     const E_EXCEEDS_ADMIN_CAP: u64      = 315;
 
     // ─── Auction Types ────────────────────────────────────────────────────────
     const AUCTION_TYPE_FORWARD: u8 = 0;
+    const AUCTION_TYPE_REVERSE: u8 = 1;
 
     // ─── Status ───────────────────────────────────────────────────────────────
     const STATUS_ACTIVE: u8   = 0;
@@ -61,6 +65,8 @@ module fair_auction::auction {
         /// For forward: NFT id in seller's collection (locked)
         nft_id: u64,
         nft_owner: address,   // original owner before vault
+        /// For reverse: text description of requirement
+        requirement_description: String,
         starting_price: u64,
         current_best_bid: u64,  // highest (fwd) or lowest (rev)
         best_bidder: address,
@@ -69,15 +75,17 @@ module fair_auction::auction {
         status: u8,
         bid_history: vector<BidRecord>,
         bidder_states: vector<UserBidState>,
+        /// For reverse: buyer's maximum budget locked in vault
+        buyer_budget: u64,
         admin: address,
         vault_address: address,
-        min_bid_increment_bps: u64,
+        min_bid_change_bps: u64,
         bid_cooldown_seconds: u64,
         max_bids_per_user: u64,
         max_extensions: u64,
         speed_bump_seconds: u64,
         extension_seconds: u64,
-        bid_fee_octas: u64,
+        bidfee_octas: u64,
     }
 
     struct AuctionStore has key {
@@ -155,26 +163,32 @@ module fair_auction::auction {
         let seller_addr = signer::address_of(seller);
 
         // Fetch admin config
-        let (cap_max_duration, cap_min_inc, cap_cooldown, fee, cap_max_bids, cap_max_ext, cap_speed_bump, cap_ext_secs)
-            = config::get_config(admin);
+        // Fetch protocol bounds from Admin
+        let (
+            fee,
+            min_inc, max_inc,
+            _min_dec, _max_dec,
+            min_cool, max_cool,
+            min_bids, max_bids_limit,
+            min_ext, max_ext_limit,
+            min_sb, max_sb,
+            min_es, max_es
+        ) = config::get_protocol_bounds(admin);
 
-        assert!(duration_seconds > 0 && duration_seconds <= cap_max_duration, E_INVALID_DURATION);
-        assert!(min_bid_inc_bps >= cap_min_inc, E_EXCEEDS_ADMIN_CAP);
-        assert!(cooldown_secs <= cap_cooldown, E_EXCEEDS_ADMIN_CAP);
-        if (cap_max_bids > 0) {
-            assert!(max_bids > 0 && max_bids <= cap_max_bids, E_EXCEEDS_ADMIN_CAP);
-        };
-        assert!(max_ext <= cap_max_ext, E_EXCEEDS_ADMIN_CAP);
-        assert!(speed_bump <= cap_speed_bump, E_EXCEEDS_ADMIN_CAP);
-        assert!(ext_secs <= cap_ext_secs, E_EXCEEDS_ADMIN_CAP);
+        // Validation against Protocol Guards
+        assert!(min_bid_inc_bps >= min_inc && min_bid_inc_bps <= max_inc, E_EXCEEDS_ADMIN_CAP);
+        assert!(cooldown_secs >= min_cool && cooldown_secs <= max_cool, E_EXCEEDS_ADMIN_CAP);
+        assert!(max_bids >= min_bids && max_bids <= max_bids_limit, E_EXCEEDS_ADMIN_CAP);
+        assert!(max_ext >= min_ext && max_ext <= max_ext_limit, E_EXCEEDS_ADMIN_CAP);
+        assert!(speed_bump >= min_sb && speed_bump <= max_sb, E_EXCEEDS_ADMIN_CAP);
+        assert!(ext_secs >= min_es && ext_secs <= max_es, E_EXCEEDS_ADMIN_CAP);
 
         let vault_addr = vault::get_vault_address(admin);
         let now = timestamp::now_seconds();
         let end_time = now + duration_seconds;
 
-        // Lock the NFT (auction module is a friend of nft module)
-        // In a production system you'd call nft::lock_for_auction here.
-        // For simplicity in this scaffold we track the intent on-chain.
+        // Lock the NFT so it cannot be transferred during auction
+        fair_auction::nft::lock_for_auction(seller_addr, nft_id);
 
         let store = borrow_global_mut<AuctionStore>(store_owner);
         let auction_id = store.next_id;
@@ -185,6 +199,7 @@ module fair_auction::auction {
             seller: seller_addr,
             nft_id,
             nft_owner: seller_addr,
+            requirement_description: std::string::utf8(b""),
             starting_price,
             current_best_bid: 0,
             best_bidder: @0x0,
@@ -193,15 +208,16 @@ module fair_auction::auction {
             status: STATUS_ACTIVE,
             bid_history: vector::empty<BidRecord>(),
             bidder_states: vector::empty<UserBidState>(),
+            buyer_budget: 0,
             admin,
             vault_address: vault_addr,
-            min_bid_increment_bps: min_bid_inc_bps,
+            min_bid_change_bps: min_bid_inc_bps,
             bid_cooldown_seconds: cooldown_secs,
             max_bids_per_user: max_bids,
             max_extensions: max_ext,
             speed_bump_seconds: speed_bump,
             extension_seconds: ext_secs,
-            bid_fee_octas: fee,
+            bidfee_octas: fee,
         };
 
         vector::push_back(&mut store.auctions, auction);
@@ -217,7 +233,96 @@ module fair_auction::auction {
         });
     }
 
-    // ─── Place Bid ────────────────────────────────────────────────────────────
+    // ─── Reverse Auction Creation ─────────────────────────────────────────────
+
+    /// Creates a reverse auction. Buyer deposits their maximum budget.
+    public entry fun create_reverse_auction(
+        buyer: &signer,
+        store_owner: address,
+        admin: address,
+        requirement_description: String,
+        max_budget: u64,
+        duration_seconds: u64,
+        min_bid_dec_bps: u64,
+        cooldown_secs: u64,
+        max_bids: u64,
+        max_ext: u64,
+        speed_bump: u64,
+        ext_secs: u64,
+    ) acquires AuctionStore {
+        let buyer_addr = signer::address_of(buyer);
+
+        // Fetch protocol bounds from Admin
+        let (
+            fee,
+            _min_inc, _max_inc,
+            min_dec, max_dec,
+            min_cool, max_cool,
+            min_bids, max_bids_limit,
+            min_ext, max_ext_limit,
+            min_sb, max_sb,
+            min_es, max_es
+        ) = config::get_protocol_bounds(admin);
+
+        // Validation against Protocol Guards
+        assert!(min_bid_dec_bps >= min_dec && min_bid_dec_bps <= max_dec, E_EXCEEDS_ADMIN_CAP);
+        assert!(cooldown_secs >= min_cool && cooldown_secs <= max_cool, E_EXCEEDS_ADMIN_CAP);
+        assert!(max_bids >= min_bids && max_bids <= max_bids_limit, E_EXCEEDS_ADMIN_CAP);
+        assert!(max_ext >= min_ext && max_ext <= max_ext_limit, E_EXCEEDS_ADMIN_CAP);
+        assert!(speed_bump >= min_sb && speed_bump <= max_sb, E_EXCEEDS_ADMIN_CAP);
+        assert!(ext_secs >= min_es && ext_secs <= max_es, E_EXCEEDS_ADMIN_CAP);
+        let vault_addr = vault::get_vault_address(admin);
+
+        // Deposit buyer's budget into vault
+        vault::deposit_coins(buyer, max_budget, vault_addr);
+
+        let now = timestamp::now_seconds();
+        let end_time = now + duration_seconds;
+
+        let store = borrow_global_mut<AuctionStore>(store_owner);
+        let auction_id = store.next_id;
+
+        let auction = Auction {
+            id: auction_id,
+            auction_type: AUCTION_TYPE_REVERSE,
+            seller: buyer_addr,
+            nft_id: 0,
+            nft_owner: @0x0,
+            requirement_description,
+            starting_price: max_budget,
+            current_best_bid: max_budget + 1,  // sentinel: no bids yet
+            best_bidder: @0x0,
+            end_time,
+            extension_count: 0,
+            status: STATUS_ACTIVE,
+            bid_history: vector::empty<BidRecord>(),
+            bidder_states: vector::empty<UserBidState>(),
+            buyer_budget: max_budget,
+            admin,
+            vault_address: vault_addr,
+            min_bid_change_bps: min_bid_dec_bps,
+            bid_cooldown_seconds: cooldown_secs,
+            max_bids_per_user: max_bids,
+            max_extensions: max_ext,
+            speed_bump_seconds: speed_bump,
+            extension_seconds: ext_secs,
+            bidfee_octas: fee,
+        };
+
+        vector::push_back(&mut store.auctions, auction);
+        store.next_id = auction_id + 1;
+
+        event::emit(AuctionCreatedEvent {
+            auction_id,
+            auction_type: AUCTION_TYPE_REVERSE,
+            seller: buyer_addr,
+            nft_id: 0,
+            starting_price: max_budget,
+            end_time,
+        });
+    }
+
+    // ─── Place Bid (Forward) ──────────────────────────────────────────────────
 
     public entry fun place_bid(
         bidder: &signer,
@@ -243,7 +348,7 @@ module fair_auction::auction {
         let min_next_bid = if (auction.current_best_bid == 0) {
             auction.starting_price
         } else {
-            auction.current_best_bid + (auction.current_best_bid * auction.min_bid_increment_bps / 10000)
+            auction.current_best_bid + (auction.current_best_bid * auction.min_bid_change_bps / 10000)
         };
         assert!(bid_amount >= min_next_bid, E_BID_TOO_LOW);
 
@@ -261,7 +366,7 @@ module fair_auction::auction {
         };
 
         // Pay fee
-        vault::deposit_coins(bidder, auction.bid_fee_octas, auction.vault_address);
+        vault::deposit_coins(bidder, auction.bidfee_octas, auction.vault_address);
 
         // Lock only the additional amount (delta)
         let additional = if (bidder_idx_found) {
@@ -330,6 +435,77 @@ module fair_auction::auction {
         });
     }
 
+    // ─── Place Bid (Reverse) ──────────────────────────────────────────────────
+
+    public entry fun place_reverse_bid(
+        seller: &signer,
+        store_owner: address,
+        auction_id: u64,
+        bid_amount: u64,
+    ) acquires AuctionStore {
+        let seller_addr = signer::address_of(seller);
+        let now = timestamp::now_seconds();
+
+        let store = borrow_global_mut<AuctionStore>(store_owner);
+        let (found, idx) = find_auction_index(&store.auctions, auction_id);
+        assert!(found, E_AUCTION_NOT_FOUND);
+
+        let auction = vector::borrow_mut(&mut store.auctions, idx);
+
+        assert!(auction.status == STATUS_ACTIVE, E_ALREADY_SETTLED);
+        assert!(now < auction.end_time, E_AUCTION_ENDED);
+        assert!(auction.auction_type == AUCTION_TYPE_REVERSE, E_AUCTION_NOT_FOUND);
+
+        // Must be lower than current best
+        let has_bids = auction.best_bidder != @0x0;
+        if (has_bids) {
+            assert!(bid_amount < auction.current_best_bid, E_REVERSE_ONLY_DECREASE);
+            // Percentage check on decrement
+            let max_new = auction.current_best_bid
+                - (auction.current_best_bid * auction.min_bid_change_bps / 10000);
+            assert!(bid_amount <= max_new, E_BID_TOO_LOW);
+        } else {
+            assert!(bid_amount <= auction.starting_price, E_BID_TOO_LOW);
+        };
+
+        // Cooldown check
+        let (bidder_idx_found, bidder_idx) = find_bidder_index(&auction.bidder_states, seller_addr);
+        if (bidder_idx_found) {
+            let state = vector::borrow(&auction.bidder_states, bidder_idx);
+            assert!(now - state.last_bid_time >= auction.bid_cooldown_seconds, E_BID_COOLDOWN);
+            if (auction.max_bids_per_user > 0) {
+                assert!(state.bid_count < auction.max_bids_per_user, E_MAX_BIDS_REACHED);
+            };
+        };
+
+        auction.current_best_bid = bid_amount;
+        auction.best_bidder = seller_addr;
+
+        let record = BidRecord { bidder: seller_addr, amount: bid_amount, timestamp: now };
+        vector::push_back(&mut auction.bid_history, record);
+
+        if (bidder_idx_found) {
+            let state = vector::borrow_mut(&mut auction.bidder_states, bidder_idx);
+            state.bid_count = state.bid_count + 1;
+            state.last_bid_time = now;
+        } else {
+            vector::push_back(&mut auction.bidder_states, UserBidState {
+                bidder: seller_addr,
+                locked_amount: 0,
+                bid_count: 1,
+                last_bid_time: now,
+            });
+        };
+
+        event::emit(BidPlacedEvent {
+            auction_id,
+            bidder: seller_addr,
+            amount: bid_amount,
+            new_end_time: auction.end_time,
+            timestamp: now,
+        });
+    }
+
     // ─── Settlement ───────────────────────────────────────────────────────────
 
     /// Settles a forward auction. Permissionless – anyone can call once end_time passed.
@@ -354,7 +530,9 @@ module fair_auction::auction {
         auction.status = STATUS_SETTLED;
 
         if (auction.best_bidder == @0x0 || auction.current_best_bid == 0) {
-            // No bids – NFT stays with seller; no transfers
+            // No bids – Unlock NFT so seller can use it again
+            fair_auction::nft::unlock_from_auction(auction.seller, auction.nft_id);
+            
             event::emit(AuctionSettledEvent {
                 auction_id,
                 winner: auction.seller,
@@ -372,9 +550,8 @@ module fair_auction::auction {
         // Transfer winning amount to seller
         vault::withdraw_coins(vault_addr, seller, winning_amount);
 
-        // NFT transfer would be triggered here via nft::deposit_nft(winner, nft)
-        // In practice, the auction contract holds the signer_cap or the frontend calls settle
-        // and then a separate NFT transfer tx completes the settlement.
+        // Atomic transfer of NFT to winner
+        fair_auction::nft::finalize_settlement(seller, winner, auction.nft_id);
 
         event::emit(AuctionSettledEvent {
             auction_id,
@@ -382,6 +559,97 @@ module fair_auction::auction {
             winning_amount,
             timestamp: now,
         });
+    }
+
+    /// Settles a reverse auction.
+    public entry fun settle_reverse_auction(
+        caller: &signer,
+        store_owner: address,
+        auction_id: u64,
+    ) acquires AuctionStore {
+        let _ = signer::address_of(caller);
+        let now = timestamp::now_seconds();
+
+        let store = borrow_global_mut<AuctionStore>(store_owner);
+        let (found, idx) = find_auction_index(&store.auctions, auction_id);
+        assert!(found, E_AUCTION_NOT_FOUND);
+
+        let auction = vector::borrow_mut(&mut store.auctions, idx);
+
+        assert!(auction.status == STATUS_ACTIVE, E_ALREADY_SETTLED);
+        assert!(now >= auction.end_time, E_AUCTION_NOT_ENDED);
+        assert!(auction.auction_type == AUCTION_TYPE_REVERSE, E_AUCTION_NOT_FOUND);
+
+        auction.status = STATUS_SETTLED;
+
+        let buyer = auction.seller;
+        let vault_addr = auction.vault_address;
+        let budget = auction.buyer_budget;
+
+        if (auction.best_bidder == @0x0) {
+            // No bids – refund entire budget to buyer
+            vault::withdraw_coins(vault_addr, buyer, budget);
+            event::emit(AuctionSettledEvent {
+                auction_id,
+                winner: @0x0,
+                winning_amount: 0,
+                timestamp: now,
+            });
+            return
+        };
+
+        let winner = auction.best_bidder;
+        let winning_amount = auction.current_best_bid;
+
+        // Pay winner (lowest bidder / service provider)
+        vault::withdraw_coins(vault_addr, winner, winning_amount);
+
+        // Refund remainder to buyer
+        let refund = budget - winning_amount;
+        if (refund > 0) {
+            vault::withdraw_coins(vault_addr, buyer, refund);
+        };
+
+        event::emit(AuctionSettledEvent {
+            auction_id,
+            winner,
+            winning_amount,
+            timestamp: now,
+        });
+    }
+    public entry fun cancel_forward_auction(
+        account: &signer,
+        store_owner: address,
+        auction_id: u64,
+    ) acquires AuctionStore {
+        let sender = signer::address_of(account);
+        let store = borrow_global_mut<AuctionStore>(store_owner);
+        let (found, idx) = find_auction_index(&store.auctions, auction_id);
+        assert!(found, E_AUCTION_NOT_FOUND);
+        
+        let auction = vector::borrow_mut(&mut store.auctions, idx);
+        assert!(auction.status == 0, 100); // 0 = active
+        assert!(sender == auction.seller || sender == @fair_auction, 101);
+
+        auction.status = 2; // 2 = cancelled
+        fair_auction::nft::unlock_from_auction(auction.seller, auction.nft_id);
+    }
+
+    public entry fun cancel_reverse_auction(
+        account: &signer,
+        store_owner: address,
+        auction_id: u64,
+    ) acquires AuctionStore {
+        let sender = signer::address_of(account);
+        let store = borrow_global_mut<AuctionStore>(store_owner);
+        let (found, idx) = find_auction_index(&store.auctions, auction_id);
+        assert!(found, E_AUCTION_NOT_FOUND);
+        
+        let auction = vector::borrow_mut(&mut store.auctions, idx);
+        assert!(auction.status == 0, 100);
+        assert!(sender == auction.seller || sender == @fair_auction, 101);
+
+        auction.status = 2;
     }
 
     // ─── View Functions ───────────────────────────────────────────────────────

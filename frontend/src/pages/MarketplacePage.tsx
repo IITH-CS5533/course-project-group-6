@@ -1,31 +1,53 @@
 import React, { useEffect, useState, useContext } from "react";
 import { useNavigate } from "react-router-dom";
-import { timeRemaining, formatAPT, fetchAllAuctions } from "../hooks/useAptos";
+import { timeRemaining, formatAPT, fetchAllAuctions, settleForwardAuction, settleReverseAuction } from "../hooks/useAptos";
 import type { Auction, FilterStatus, FilterType, SortOption } from "../types";
 import { WalletContext } from "../App";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
 
-function AuctionCard({ auction }: { auction: Auction }) {
+function AuctionCard({ auction, onSettle }: { auction: Auction, onSettle: () => void }) {
   const navigate = useNavigate();
+  const { signAndSubmitTransaction } = useWallet();
   const [timer, setTimer] = useState(timeRemaining(auction.endTime));
+  const [isSettling, setIsSettling] = useState(false);
   const isUrgent = auction.endTime - Date.now()/1000 < 300;
+  const isExpired = auction.endTime - Date.now()/1000 <= 0;
 
   useEffect(() => {
     const id = setInterval(() => setTimer(timeRemaining(auction.endTime)), 1000);
     return () => clearInterval(id);
   }, [auction.endTime]);
 
+  const handleSettle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!signAndSubmitTransaction) return;
+    setIsSettling(true);
+    try {
+      if (auction.auctionType === "forward") {
+        await settleForwardAuction(signAndSubmitTransaction, auction.id);
+      } else {
+        await settleReverseAuction(signAndSubmitTransaction, auction.id);
+      }
+      onSettle();
+    } catch (err) {
+      console.error("Settlement failed", err);
+    } finally {
+      setIsSettling(false);
+    }
+  };
+
   const nft = auction.nftMetadata;
 
   return (
-    <div className="card" style={{ overflow:"hidden", cursor:"pointer" }}
-      onClick={() => navigate(`/auction/${auction.id}`)}>
+    <div className="card animate-fade-in" style={{ overflow:"hidden", cursor:"pointer", transition: "transform 0.2s" }}
+      onClick={() => navigate(`/auction/${auction.id}`)}
+      onMouseOver={e => (e.currentTarget.style.transform="translateY(-4px)")}
+      onMouseOut={e => (e.currentTarget.style.transform="translateY(0)")}>
       {/* Image */}
       <div style={{ position:"relative", paddingTop:"75%", overflow:"hidden", background:"#1a2235" }}>
         {nft?.imageUrl ? (
           <img src={nft.imageUrl} alt={nft.name}
-            style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"cover", transition:"transform 0.4s" }}
-            onMouseOver={e => (e.currentTarget.style.transform="scale(1.05)")}
-            onMouseOut={e => (e.currentTarget.style.transform="scale(1)")}
+            style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"cover" }}
           />
         ) : (
           <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
@@ -35,8 +57,8 @@ function AuctionCard({ auction }: { auction: Auction }) {
         )}
         {/* Badges overlay */}
         <div style={{ position:"absolute", top:12, left:12, display:"flex", gap:6 }}>
-          <span className={`badge badge-forward`}>
-            Forward
+          <span className={`badge badge-${auction.auctionType}`}>
+            {auction.auctionType === "forward" ? "Forward" : "Reverse"}
           </span>
           {auction.status === "active" && (
             <span className={`badge ${isUrgent ? "badge-ending" : "badge-active"}`}>
@@ -56,8 +78,13 @@ function AuctionCard({ auction }: { auction: Auction }) {
 
       {/* Body */}
       <div style={{ padding:"18px" }}>
-        {nft && (
+        {auction.auctionType === "forward" && nft && (
           <h3 style={{ fontSize:16, fontWeight:700, marginBottom:4, color:"#f1f5f9" }}>{nft.name}</h3>
+        )}
+        {auction.auctionType === "reverse" && (
+          <h3 style={{ fontSize:15, fontWeight:700, marginBottom:4, color:"#f1f5f9", lineHeight:1.4 }}>
+            {auction.requirementDescription.slice(0,60)}…
+          </h3>
         )}
         <p style={{ fontSize:13, color:"#64748b", marginBottom:14 }}>
           Seller: {auction.seller.slice(0,8)}…
@@ -66,7 +93,7 @@ function AuctionCard({ auction }: { auction: Auction }) {
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
           <div style={{ background:"rgba(255,255,255,0.03)", borderRadius:8, padding:"10px 12px" }}>
             <div style={{ fontSize:11, color:"#64748b", fontWeight:600, marginBottom:4, textTransform:"uppercase", letterSpacing:"0.05em" }}>
-              Current Bid
+              {auction.auctionType === "forward" ? "Current Bid" : "Lowest Bid"}
             </div>
             <div style={{ fontSize:18, fontWeight:800, color:"#6366f1", fontFamily:"'Space Grotesk',sans-serif" }}>
               {auction.currentBestBid > 0 ? `${formatAPT(auction.currentBestBid)} APT` : "No bids"}
@@ -82,14 +109,26 @@ function AuctionCard({ auction }: { auction: Auction }) {
           </div>
         </div>
 
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", fontSize:13, color:"#64748b" }}>
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-            Total Bids: {auction.bidHistory.length}
-          </span>
-          <span style={{ display:"flex", alignItems:"center", gap:4 }}>
-            Starting: {formatAPT(auction.startingPrice)} APT
-          </span>
-        </div>
+        {/* Action Button */}
+        {auction.status === "active" && isExpired ? (
+          <button 
+            className="btn btn-primary" 
+            style={{ width: "100%", marginTop: 8, height: 40, fontSize: 14 }}
+            onClick={handleSettle}
+            disabled={isSettling}
+          >
+            {isSettling ? "Settling..." : "Settle Auction"}
+          </button>
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", fontSize:13, color:"#64748b", marginTop: 8 }}>
+            <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+              Total Bids: {auction.bidHistory.length}
+            </span>
+            <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+              Starting: {formatAPT(auction.startingPrice)} APT
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -101,14 +140,20 @@ export default function MarketplacePage() {
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<FilterStatus>("all");
+  const [filterType, setFilterType] = useState<FilterType>("all");
   const [sort, setSort] = useState<SortOption>("endTime");
   const { connected } = useContext(WalletContext);
 
-  useEffect(() => {
+  const loadData = () => {
+    setLoading(true);
     fetchAllAuctions().then((data) => {
       setAuctions(data);
       setLoading(false);
     });
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
 
   const active = auctions.filter(a => a.status === "active").length;
@@ -116,11 +161,13 @@ export default function MarketplacePage() {
 
   const filtered = auctions
     .filter(a => filterStatus === "all" || a.status === filterStatus)
+    .filter(a => filterType === "all" || a.auctionType === filterType)
     .filter(a => {
       if (!search) return true;
       const q = search.toLowerCase();
       return (
-        a.nftMetadata?.name?.toLowerCase().includes(q) ||
+        a.nftMetadata?.name.toLowerCase().includes(q) ||
+        a.requirementDescription.toLowerCase().includes(q) ||
         a.seller.toLowerCase().includes(q)
       );
     })
@@ -132,10 +179,10 @@ export default function MarketplacePage() {
     });
 
   return (
-    <div className="page">
+    <div className="page animate-fade-in">
       <div className="container">
         {/* Hero */}
-        <div style={{ textAlign:"center", marginBottom:48 }} className="animate-fade">
+        <div style={{ textAlign:"center", marginBottom:48 }}>
           <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"6px 16px",
             borderRadius:20, background:"rgba(99,102,241,0.1)", border:"1px solid rgba(99,102,241,0.2)",
             fontSize:13, fontWeight:600, color:"#818cf8", marginBottom:20 }}>
@@ -179,6 +226,14 @@ export default function MarketplacePage() {
             ))}
           </div>
 
+          <div className="tabs">
+            {(["all","forward","reverse"] as FilterType[]).map(t => (
+              <button key={t} className={`tab ${filterType===t?"active":""}`} onClick={() => setFilterType(t)}>
+                {t.charAt(0).toUpperCase()+t.slice(1)}
+              </button>
+            ))}
+          </div>
+
           <select className="input" style={{ width:"auto", flex:"0 0 auto" }}
             value={sort} onChange={e => setSort(e.target.value as SortOption)}>
             <option value="endTime">Ending Soon</option>
@@ -191,7 +246,8 @@ export default function MarketplacePage() {
         {/* Grid */}
         {loading ? (
           <div style={{ textAlign:"center", padding:"80px 0" }}>
-            <h2>Loading Data...</h2>
+            <div className="spinner" style={{ margin: "0 auto 20px" }}></div>
+            <h2>Fetching Marketplace Data...</h2>
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign:"center", padding:"80px 0", color:"#475569" }}>
@@ -199,7 +255,7 @@ export default function MarketplacePage() {
             <p>Adjust your filter parameters.</p>
           </div>
         ) : (
-          <div className="grid-3 animate-fade">{filtered.map(a => <AuctionCard key={a.id} auction={a}/>)}</div>
+          <div className="grid-3">{filtered.map(a => <AuctionCard key={a.id} auction={a} onSettle={loadData}/>)}</div>
         )}
       </div>
     </div>

@@ -36,7 +36,7 @@ function BidHistoryRow({ bidder, amount, timestamp, isTop }: { bidder:string; am
   );
 }
 
-function SimulationPanel({ result, bidAmount }: { result: SimulationResult; bidAmount: number }) {
+function SimulationPanel({ result, bidAmount, isForward }: { result: SimulationResult; bidAmount: number; isForward: boolean }) {
   return (
     <div style={{ border:"1px solid rgba(99,102,241,0.2)", borderRadius:10,
       padding:"18px", background:"rgba(99,102,241,0.05)", marginTop:12 }}>
@@ -51,7 +51,7 @@ function SimulationPanel({ result, bidAmount }: { result: SimulationResult; bidA
           </span>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", fontSize:14 }}>
-          <span style={{ color:"#94a3b8" }}>Min Required</span>
+          <span style={{ color:"#94a3b8" }}>{isForward ? "Min Required" : "Max Allowed"}</span>
           <span style={{ fontWeight:600 }}>{formatAPT(result.minNextBid)} APT</span>
         </div>
         <div style={{ display:"flex", justifyContent:"space-between", fontSize:14 }}>
@@ -71,7 +71,7 @@ function SimulationPanel({ result, bidAmount }: { result: SimulationResult; bidA
         )}
         {result.willSucceed && (
           <div className="alert alert-success" style={{ marginTop:4 }}>
-            <CheckCircle size={14}/> Your bid of {formatAPT(bidAmount)} APT will become the new highest bid.
+            <CheckCircle size={14}/> {isForward ? `Your bid of ${formatAPT(bidAmount)} APT will become the new highest bid.` : `Your offer of ${formatAPT(bidAmount)} APT will become the new lowest bid.`}
           </div>
         )}
       </div>
@@ -138,21 +138,31 @@ export default function AuctionDetailPage() {
 
   const nft = auction.nftMetadata;
   const isActive = auction.status === "active";
+  const isForward = auction.auctionType === "forward";
   const isUrgent = auction.endTime - Date.now()/1000 < 300;
-  const minBid = auction.currentBestBid > 0
-    ? auction.currentBestBid * 1.05
-    : auction.startingPrice;
+  
+  const minBid = isForward 
+    ? (auction.currentBestBid > 0 ? auction.currentBestBid * 1.05 : auction.startingPrice)
+    : (auction.currentBestBid > 0 ? auction.currentBestBid * 0.95 : auction.startingPrice);
 
   async function handleBid() {
     if (!connected) { connect(); return; }
+    // Prevent self-bidding
+    if (address && auction.seller && address.toLowerCase() === auction.seller.toLowerCase()) {
+      setTxStatus("error");
+      setTxMsg("You cannot bid on your own auction.");
+      return;
+    }
     setTxStatus("pending");
     setTxMsg("Prompting wallet... Please approve the transaction.");
     
     try {
+      const isForward = auction.auctionType === "forward";
       const amountInOctas = Math.floor(parseFloat(bidInput) * OCTAS_PER_APT);
+      
       const payload = {
         data: {
-          function: `${CONTRACT_ADDRESS}::auction::place_bid`,
+          function: `${CONTRACT_ADDRESS}::auction::${isForward ? 'place_bid' : 'place_reverse_bid'}`,
           typeArguments: [],
           functionArguments: [STORE_OWNER_ADDRESS, auction.id, amountInOctas],
         }
@@ -231,6 +241,16 @@ export default function AuctionDetailPage() {
                     </div>
                   </>
                 )}
+                {auction.auctionType === "reverse" && (
+                  <>
+                    <h2 style={{ fontSize:22, fontWeight:800, marginBottom:12 }}>Service Requirement</h2>
+                    <div className="card" style={{ padding:20 }}>
+                      <p style={{ lineHeight:1.7, color:"#cbd5e1" }}>{auction.requirementDescription}</p>
+                    </div>
+                    <div className="alert alert-info" style={{ marginTop:16 }}>
+                      <Info size={14}/> This is a reverse auction. Place a lower bid to win the contract. The buyer has locked {formatAPT(auction.buyerBudget)} APT as payment.
+                    </div>
+                  </>
                 )}
 
                 {/* Anti-bot info */}
@@ -278,8 +298,8 @@ export default function AuctionDetailPage() {
                   <span className={`badge ${isActive ? (isUrgent ? "badge-ending" : "badge-active") : "badge-settled"}`}>
                     {isActive ? (isUrgent ? "Ending Soon" : "Live") : "Settled"}
                   </span>
-                  <span className={`badge badge-forward`} style={{ marginLeft:6 }}>
-                    Forward
+                  <span className={`badge badge-${auction.auctionType}`} style={{ marginLeft:6 }}>
+                    {auction.auctionType === "forward" ? "Forward" : "Reverse"}
                   </span>
                 </div>
                 <div className={`countdown ${isUrgent ? "urgent" : ""}`} style={{ fontSize:22, fontWeight:800 }}>
@@ -292,7 +312,7 @@ export default function AuctionDetailPage() {
               {/* Current bid */}
               <div style={{ marginBottom:20 }}>
                 <div style={{ fontSize:12, color:"#64748b", fontWeight:600, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:6 }}>
-                  Current Highest Bid
+                  {auction.auctionType==="forward" ? "Current Highest Bid" : "Current Lowest Bid"}
                 </div>
                 <div style={{ fontSize:38, fontWeight:900, color:"#6366f1", fontFamily:"'Space Grotesk',sans-serif" }}>
                   {auction.currentBestBid > 0 ? `${formatAPT(auction.currentBestBid)} APT` : "No bids yet"}
@@ -312,17 +332,25 @@ export default function AuctionDetailPage() {
               {/* Bid form */}
               {isActive ? (
                 <>
+                  {/* Self-bid guard */}
+                  {connected && address && auction.seller &&
+                   address.toLowerCase() === auction.seller.toLowerCase() ? (
+                    <div className="alert alert-warning" style={{ margin: "16px 0" }}>
+                      <AlertTriangle size={14}/> You are the seller of this auction and cannot place a bid.
+                    </div>
+                  ) : (
+                    <>
                   <div className="input-group" style={{ marginBottom:12 }}>
-                    <label>Your Bid (APT)</label>
+                    <label>{isForward ? "Your Bid (APT)" : "Your Offer (APT)"}</label>
                     <input type="number" className="input" step="0.01" min="0"
-                      placeholder={`Min ${(minBid/OCTAS_PER_APT).toFixed(4)} APT`}
+                      placeholder={isForward ? `Min ${(minBid/OCTAS_PER_APT).toFixed(4)} APT` : `Max ${(minBid/OCTAS_PER_APT).toFixed(4)} APT`}
                       value={bidInput} onChange={e => setBidInput(e.target.value)}/>
                     <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>
                       + 0.01 APT bid fee • Cooldown: 10s
                     </div>
                   </div>
 
-                  {simulation && <SimulationPanel result={simulation} bidAmount={parseFloat(bidInput)*OCTAS_PER_APT}/>}
+                  {simulation && <SimulationPanel result={simulation} bidAmount={parseFloat(bidInput)*OCTAS_PER_APT} isForward={isForward}/>}
 
                   {txStatus === "success" && (
                     <div className="alert alert-success" style={{ margin:"12px 0" }}>
@@ -338,13 +366,15 @@ export default function AuctionDetailPage() {
                   <button className="btn btn-primary btn-lg" style={{ width:"100%", marginTop:16, justifyContent:"center" }}
                     disabled={txStatus==="pending" || (!bidInput)}
                     onClick={handleBid}>
-                    {txStatus==="pending" ? "Processing..." : connected ? "Place Bid" : "Connect Wallet to Bid"}
+                    {txStatus==="pending" ? "Processing..." : connected ? (auction.auctionType==="forward" ? "Place Bid" : "Place Offer") : "Connect Wallet to Bid"}
                   </button>
 
                   {!connected && (
                     <div className="alert alert-info" style={{ marginTop:12 }}>
                       <Info size={14}/> Connect your Aptos wallet to place a bid.
                     </div>
+                  )}
+                    </>
                   )}
                 </>
               ) : (

@@ -61,6 +61,13 @@ export default function MyNFTsPage() {
   const [txStatus, setTxStatus] = useState<"idle"|"pending"|"success"|"error">("idle");
   const [txMsg, setTxMsg] = useState("");
 
+  // Toast notification
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const showToast = (msg: string, type: "success" | "error" = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+
   const refreshNFTs = () => {
     if (connected && address) {
       setLoading(true);
@@ -110,14 +117,13 @@ export default function MyNFTsPage() {
       setTxMsg("Transaction submitted. Waiting for network confirmation...");
       await aptosClient.waitForTransaction({ transactionHash: response.hash });
       
-      setTxStatus("success");
-      setTxMsg(`Asset successfully transferred.`);
+      // Close modal immediately and show toast
+      setTransferNft(null);
       setTransferAddress("");
-      setTimeout(() => {
-         setTransferNft(null);
-         setTxStatus("idle");
-         refreshNFTs();
-      }, 2000);
+      setTxStatus("idle");
+      setTxMsg("");
+      showToast(`Asset successfully transferred to ${shortAddress(transferAddress)}.`);
+      refreshNFTs();
     } catch (err: any) {
       console.error("Transfer failed", err);
       setTxStatus("error");
@@ -140,6 +146,20 @@ export default function MyNFTsPage() {
 
   return (
     <div className="page" style={{ position: "relative" }}>
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
+          zIndex: 200, minWidth: 320, maxWidth: 480,
+          background: toast.type === "success" ? "linear-gradient(135deg,#10b981,#059669)" : "linear-gradient(135deg,#ef4444,#dc2626)",
+          color: "white", padding: "14px 24px", borderRadius: 12,
+          fontWeight: 700, fontSize: 15, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span>{toast.type === "success" ? "✓" : "✕"}</span>
+          {toast.msg}
+        </div>
+      )}
       <div className="container">
         <div className="section-header">
           <div>
